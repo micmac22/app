@@ -15,7 +15,7 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root){
-  root.innerHTML = `
+  root.innerHTML = 
     <section class="card" id="setupCard">
       <h2>🎯 Podstawowy quiz</h2>
       <div class="grid" style="margin-top:10px;">
@@ -88,7 +88,7 @@ export function mount(root){
         <button id="qb_export">📥 Eksport CSV</button>
       </div>
     </section>
-  `;
+  ;
 
   const $ = sel => root.querySelector(sel);
 
