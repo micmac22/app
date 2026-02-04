@@ -1,4 +1,3 @@
-// modules/quiz-basic/index.js
 import {
   DEFAULT_REGION1,
   DEFAULT_REGION2,
@@ -12,6 +11,7 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root){
+
   root.innerHTML = `
     <section class="card" id="setupCard">
       <h2>🎯 Podstawowy quiz</h2>
@@ -50,9 +50,7 @@ export function mount(root){
 
     <section class="card" id="quizCard" style="display:none;">
       <div class="row" style="justify-content:space-between;align-items:center;">
-        <div class="row" style="gap:12px;">
-          <div class="stats-badge">Pytanie <span id="qb_curr">1</span>/<span id="qb_total">0</span></div>
-        </div>
+        <div class="stats-badge">Pytanie <span id="qb_curr">1</span>/<span id="qb_total">0</span></div>
         <div class="row" style="gap:12px;">
           <div class="stats-badge" style="color: var(--green);">✅ <span id="qb_ok">0</span></div>
           <div class="stats-badge" style="color: var(--red);">❌ <span id="qb_bad">0</span></div>
@@ -76,7 +74,7 @@ export function mount(root){
 
     <section class="card" id="resultCard" style="display:none;text-align:center;">
       <h2>🎉 Wynik</h2>
-      <div style="font-size:48px;font-weight:800;background:linear-gradient(135deg,var(--blue),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+      <div style="font-size:48px;font-weight:800;">
         <span id="qb_score">0</span>%
       </div>
       <div id="qb_scoreDetails" class="muted" style="margin-top:6px;"></div>
@@ -88,26 +86,39 @@ export function mount(root){
   `;
 
   const $ = sel => root.querySelector(sel);
+
   const STATE = { pool:[], questions:[], review:[], idx:0, ok:0, bad:0 };
+
+  function uniqueByCode(arr){
+    const map=new Map();
+    arr.forEach(x=>{
+      if(x?.code && !map.has(x.code)) map.set(x.code,x);
+    });
+    return [...map.values()];
+  }
 
   function buildPool(regionSel){
     const customs = loadCustomRegionData();
-    if(regionSel==='r1')   return [...DEFAULT_REGION1];
-    if(regionSel==='r2')   return [...DEFAULT_REGION2];
-    if(regionSel==='both') return [...DEFAULT_REGION1, ...DEFAULT_REGION2];
-    if(regionSel==='all')  return [...DEFAULT_REGION1, ...DEFAULT_REGION2, ...customs];
-    return [...DEFAULT_REGION1, ...DEFAULT_REGION2];
+    let data=[];
+    if(regionSel==='r1')   data=[...DEFAULT_REGION1];
+    if(regionSel==='r2')   data=[...DEFAULT_REGION2];
+    if(regionSel==='both') data=[...DEFAULT_REGION1,...DEFAULT_REGION2];
+    if(regionSel==='all')  data=[...DEFAULT_REGION1,...DEFAULT_REGION2,...customs];
+    return uniqueByCode(data);
   }
 
   function makeQuestions(pool, modeDir, count, opts){
     const base = sample(pool, count);
     return base.map(({name, code})=>{
       const dir = (modeDir==='mixed') ? (Math.random()<0.5?'name2code':'code2name') : modeDir;
+
       if(dir==='name2code'){
-        const choices = buildCodeChoices(code, opts, pool);
+        let choices = buildCodeChoices(code, opts, pool);
+        if(choices.length<opts) choices=[...choices,code];
         return { type:'mc', stem:`Jaki skrót ma stacja <strong>${name}</strong>?`, correct:code, expect:'code', choices };
       } else {
-        const choices = buildNameChoices(name, opts, pool);
+        let choices = buildNameChoices(name, opts, pool);
+        if(choices.length<opts) choices=[...choices,name];
         return { type:'mc', stem:`Która nazwa odpowiada skrótowi <code>${code}</code>?`, correct:name, expect:'name', choices };
       }
     });
@@ -122,37 +133,44 @@ export function mount(root){
     $('#progress').style.width = pct + '%';
   }
 
-  function feedback(ok, html){
-    $('#qb_feedback').innerHTML = `<div class="feedback ${ok?'success':'error'}">${html}</div>`;
-  }
-
   function renderQuestion(){
     const q = STATE.questions[STATE.idx];
     if(!q) return;
+
     $('#qb_stem').innerHTML = q.stem;
     $('#qb_feedback').innerHTML = '';
     const answers = $('#qb_answers'); answers.innerHTML = '';
-    if(q.type==='mc'){
-      q.choices.forEach(choice=>{
-        const btn = document.createElement('button');
-        btn.className='choice'; btn.textContent=choice;
-        btn.onclick = ()=>selectMC(q, btn, choice);
-        answers.appendChild(btn);
-      });
-    }
+
+    q.choices.forEach(choice=>{
+      const btn = document.createElement('button');
+      btn.className='choice';
+      btn.textContent=choice;
+      btn.onclick = ()=>selectMC(q, btn, choice);
+      answers.appendChild(btn);
+    });
+
     renderProgress();
   }
 
   function selectMC(q, btn, value){
-    if(q._answered) return; q._answered=true;
-    const ok = (q.expect==='code') ? isCodeMatch(value, q.correct) : isNameMatch(value, q.correct);
-    if(ok){ STATE.ok++; btn.classList.add('correct'); feedback(true,'Świetnie! 🎉'); }
-    else  { STATE.bad++; btn.classList.add('wrong');   feedback(false,`Niepoprawnie. Poprawna: <strong>${q.correct}</strong>`); }
-    STATE.review[STATE.idx] = { question:q.stem.replace(/<[^>]*>/g,''), yourAnswer:value, correctAnswer:q.correct, isCorrect:!!ok };
+    if(q._answered) return;
+    q._answered=true;
+
+    const ok = q.expect==='code'
+      ? isCodeMatch(value, q.correct)
+      : isNameMatch(value, q.correct);
+
+    if(ok){ STATE.ok++; btn.classList.add('correct'); }
+    else  { STATE.bad++; btn.classList.add('wrong'); }
+
     [...$('#qb_answers').querySelectorAll('.choice')].forEach(b=>{
       b.disabled=true;
-      if(norm(b.textContent)===norm(q.correct)) b.classList.add('correct');
+      const match = q.expect==='code'
+        ? isCodeMatch(b.textContent,q.correct)
+        : isNameMatch(b.textContent,q.correct);
+      if(match) b.classList.add('correct');
     });
+
     renderProgress();
   }
 
@@ -186,22 +204,10 @@ export function mount(root){
     $('#qb_scoreDetails').textContent = `${STATE.ok} / ${total} poprawnych`;
   }
 
-  function exportCSV(){
-    const rows=[['#','Pytanie','Twoja odpowiedź','Poprawna','Wynik']];
-    STATE.review.forEach((r,i)=> rows.push([i+1,r.question||'',r.yourAnswer||'',r.correctAnswer||'', r.isCorrect?'POPRAWNA':'BŁĘDNA']));
-    const csv = rows.map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
-    const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=`quiz_basic_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
   $('#qb_start').onclick = start;
   $('#qb_next').onclick = next;
   $('#qb_prev').onclick = prev;
   $('#qb_restart').onclick = ()=>{ $('#setupCard').style.display='block'; $('#quizCard').style.display='none'; $('#resultCard').style.display='none'; };
-  $('#qb_export').onclick = exportCSV;
 }
 
 export function unmount(root){ root.innerHTML=''; }
-``
