@@ -1,6 +1,6 @@
 // modules/quiz-basic/index.js
 // Podstawowy quiz (MC): nazwa→skrót, skrót→nazwa, mieszane
-// Wersja kompatybilna ze wspólną logiką (shared/shared-logic.js)
+// Kompatybilny ze wspólną logiką (shared/shared-logic.js)
 
 import {
   DEFAULT_REGION1,
@@ -94,7 +94,6 @@ export function mount(root){
 
   const STATE = { pool:[], questions:[], review:[], idx:0, ok:0, bad:0 };
 
-  // ————— PULA WG REGIONU (z niestandardowymi z localStorage) —————
   function buildPool(regionSel){
     const customs = loadCustomRegionData();
     if(regionSel==='r1')   return [...DEFAULT_REGION1];
@@ -104,7 +103,6 @@ export function mount(root){
     return [...DEFAULT_REGION1, ...DEFAULT_REGION2];
   }
 
-  // ————— GENEROWANIE PYTAŃ (MC) —————
   function makeQuestions(pool, modeDir, count, opts){
     const base = sample(pool, count);
     return base.map(({name, code})=>{
@@ -119,7 +117,6 @@ export function mount(root){
     });
   }
 
-  // ————— RENDER / LOGIKA —————
   function renderProgress(){
     $('#qb_curr').textContent = (STATE.idx+1);
     $('#qb_total').textContent = STATE.questions.length;
@@ -152,3 +149,62 @@ export function mount(root){
 
   function selectMC(q, btn, value){
     if(q._answered) return; q._answered=true;
+    const ok = (q.expect==='code') ? isCodeMatch(value, q.correct) : isNameMatch(value, q.correct);
+    if(ok){ STATE.ok++; btn.classList.add('correct'); feedback(true,'Świetnie! 🎉'); }
+    else  { STATE.bad++; btn.classList.add('wrong');   feedback(false,`Niepoprawnie. Poprawna: <strong>${q.correct}</strong>`); }
+    STATE.review[STATE.idx] = { question:q.stem.replace(/<[^>]*>/g,''), yourAnswer:value, correctAnswer:q.correct, isCorrect:!!ok };
+    [...$('#qb_answers').querySelectorAll('.choice')].forEach(b=>{
+      b.disabled=true;
+      if(norm(b.textContent)===norm(q.correct)) b.classList.add('correct');
+    });
+    renderProgress();
+  }
+
+  function next(){ if(STATE.idx < STATE.questions.length-1){ STATE.idx++; renderQuestion(); } else finish(); }
+  function prev(){ if(STATE.idx>0){ STATE.idx--; renderQuestion(); } }
+
+  function start(){
+    const pool = buildPool($('#qb_region').value);
+    const dir  = $('#qb_dir').value;
+    const opts = parseInt($('#qb_opts').value||'4',10);
+    const cnt  = Math.max(1, Math.min(parseInt($('#qb_count').value||'20',10), pool.length));
+
+    STATE.pool=pool;
+    STATE.questions = makeQuestions(pool, dir, cnt, opts);
+    STATE.review=[]; STATE.idx=0; STATE.ok=0; STATE.bad=0;
+
+    $('#setupCard').style.display='none';
+    $('#quizCard').style.display='block';
+    $('#resultCard').style.display='none';
+
+    renderQuestion();
+  }
+
+  function finish(){
+    $('#setupCard').style.display='none';
+    $('#quizCard').style.display='none';
+    $('#resultCard').style.display='block';
+    const total=STATE.questions.length;
+    const pct = total? Math.round(100*STATE.ok/total) : 0;
+    $('#qb_score').textContent = pct;
+    $('#qb_scoreDetails').textContent = `${STATE.ok} / ${total} poprawnych`;
+  }
+
+  function exportCSV(){
+    const rows=[['#','Pytanie','Twoja odpowiedź','Poprawna','Wynik']];
+    STATE.review.forEach((r,i)=> rows.push([i+1,r.question||'',r.yourAnswer||'',r.correctAnswer||'', r.isCorrect?'POPRAWNA':'BŁĘDNA']));
+    const csv = rows.map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+    const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`quiz_basic_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  $('#qb_start').onclick = start;
+  $('#qb_next').onclick = next;
+  $('#qb_prev').onclick = prev;
+  $('#qb_restart').onclick = ()=>{ $('#setupCard').style.display='block'; $('#quizCard').style.display='none'; $('#resultCard').style.display='none'; };
+  $('#qb_export').onclick = exportCSV;
+}
+
+export function unmount(root){ root.innerHTML=''; }
