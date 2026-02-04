@@ -1,30 +1,37 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Quiz Stacje 2.0</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quiz Stacje 2.0</title>
 
-    <!-- Główny styl aplikacji -->
-    <link rel="stylesheet" href="style.css">
+  <!-- Styl wspólny -->
+  <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
 
-    <header class="app-header">
-        <h1>⚡ Quiz Stacje 2.0</h1>
-    </header>
+  <header class="app-header">
+    <div class="wrap">
+      <h1>⚡ Quiz Stacje</h1>
+      <div class="small muted">Modułowy interfejs (PWA-ready)</div>
+    </div>
+  </header>
 
-    <nav id="menu" class="app-menu">
-        <!-- tu automatycznie pojawią się przyciski modułów -->
-    </nav>
+  <nav id="menu" class="app-menu">
+    <!-- przyciski modułów wstrzyknie app.js -->
+  </nav>
 
-    <main id="module-host" class="app-content">
-        <!-- tu będą ładowane moduły -->
-        <p class="muted">Wybierz moduł z menu powyżej.</p>
-    </main>
+  <main class="wrap">
+    <!-- Każdy moduł renderuje własne karty .card -->
+    <div id="module-host">
+      <section class="card">
+        <h2>Witaj!</h2>
+        <p class="muted">Wybierz moduł z menu powyżej, aby rozpocząć.</p>
+      </section>
+    </div>
+  </main>
 
-    <!-- Logika modułu‑matki -->
-    <script src="app.js" type="module"></script>
+  <!-- Shell loader (ESM!) -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
