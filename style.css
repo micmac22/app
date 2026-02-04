@@ -1,0 +1,71 @@
+/* Kolory i motyw */
+:root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --text: #e5e7eb;
+    --muted: #94a3b8;
+    --blue: #3b82f6;
+    --blue-hover: #2563eb;
+}
+
+/* Reset i tło */
+body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+}
+
+/* Nagłówek */
+.app-header {
+    padding: 20px;
+    text-align: center;
+    background: var(--panel);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+/* Menu modułów */
+.app-menu {
+    padding: 10px;
+    text-align: center;
+    background: var(--panel);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.app-menu button {
+    margin: 5px;
+    padding: 10px 16px;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.app-menu button:hover {
+    background: var(--blue-hover);
+}
+
+/* Zawartość modułu */
+.app-content {
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* Tekst pomocniczy */
+.muted {
+    color: var(--muted);
+}
+
+/* Karty modulowe (opcjonalne) */
+.module-card {
+    background: var(--panel);
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 20px;
+}
