@@ -75,27 +75,58 @@ export const norm = s => s.toString().trim().toLowerCase()
   .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
 
 export const stripSpaces = s => norm(s).replace(/\s+/g,"");
-export const shuffle = arr => { const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; };
-export const sample  = (arr,k) => shuffle(arr).slice(0, Math.min(k, arr.length));
-export const unique  = arr => Array.from(new Set(arr.filter(v=>v!=null)));
 
+export const shuffle = arr => {
+  const a=[...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+};
+
+export const sample  = (arr,k) =>
+  shuffle(arr).slice(0, Math.min(k, arr.length));
+
+export const unique  = arr =>
+  Array.from(new Set(arr.filter(v=>v!=null)));
+
+export const uniqueBy = (arr, keyFn) => {
+  const map=new Map();
+  arr.forEach(x=>{
+    const k=keyFn(x);
+    if(k!=null && !map.has(k)) map.set(k,x);
+  });
+  return [...map.values()];
+};
+
+// ===== TOKENY =====
 export const COMMON_WORDS = new Set(['podstacja','trakcyjna','pkp','kolej','trakcja','pt']);
 export const tokenize  = s => norm(s).split(/[^a-z0-9]+/g).filter(Boolean);
 export const sigTokens = tokens => tokens.filter(t => !COMMON_WORDS.has(t) && t.length>1);
 
 // ===== DL =====
 export function damerauLevenshtein(a,b){
-  a = norm(a); b=norm(b); const m=a.length,n=b.length;
-  if(!m) return n; if(!n) return m;
+  a = norm(a); b=norm(b);
+  const m=a.length,n=b.length;
+  if(!m) return n;
+  if(!n) return m;
   const dp = Array.from({length:m+1},()=>Array(n+1).fill(0));
   for(let i=0;i<=m;i++) dp[i][0]=i;
   for(let j=0;j<=n;j++) dp[0][j]=j;
   for(let i=1;i<=m;i++){
     for(let j=1;j<=n;j++){
       const cost = a[i-1]===b[j-1]?0:1;
-      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
-      if(i>1 && j>1 && a[i-1]===b[j-2] && a[i-2]===b[j-1])
+      dp[i][j] = Math.min(
+        dp[i-1][j]+1,
+        dp[i][j-1]+1,
+        dp[i-1][j-1]+cost
+      );
+      if(i>1 && j>1 &&
+         a[i-1]===b[j-2] &&
+         a[i-2]===b[j-1]){
         dp[i][j] = Math.min(dp[i][j], dp[i-2][j-2]+1);
+      }
     }
   }
   return dp[m][n];
@@ -108,7 +139,9 @@ export function isCodeMatch(input, correct){
   const b = stripSpaces(correct).toUpperCase();
   if(!a) return false;
   if(a===b) return true;
-  if(a.length===b.length && a.split('').sort().join('') === b.split('').sort().join('')) return true;
+  if(a.length===b.length &&
+     a.split('').sort().join('') ===
+     b.split('').sort().join('')) return true;
   return damerauLevenshtein(a,b) <= 1;
 }
 
@@ -124,20 +157,24 @@ export function isNameMatch(input, correct){
   if(BT.length>0 && BT.every(t=>AT.includes(t))) return true;
 
   if(BT.length===1){
-    const aTok=AT.join(' '), bTok=BT.join(' ');
+    const aTok=AT.join(' ');
+    const bTok=BT.join(' ');
     if(damerauLevenshtein(aTok,bTok) <= 2) return true;
   }
 
   const AS=stripSpaces(A), BS=stripSpaces(B);
-  if(Math.abs(AS.length-BS.length)<=2 && damerauLevenshtein(AS,BS)<=2) return true;
+  if(Math.abs(AS.length-BS.length)<=2 &&
+     damerauLevenshtein(AS,BS)<=2) return true;
 
   return false;
 }
 
-// ===== DYSTRKTORY KODÓW =====
+// ===== PERMUTACJE =====
 export function genRandomPermutations(s,count){
-  const base=s.toUpperCase(), chars=base.split('');
-  const out=new Set(); let guard=0;
+  const base=s.toUpperCase();
+  const chars=base.split('');
+  const out=new Set();
+  let guard=0;
   while(out.size<count && guard<count*20){
     guard++;
     const arr=[...chars];
@@ -151,12 +188,16 @@ export function genRandomPermutations(s,count){
   return [...out];
 }
 
+// ===== DYSTRKTORY KODÓW =====
 export function buildCodeDistractors(correct, count, pool){
   const target = stripSpaces(correct).toUpperCase();
-  const codes  = unique(pool.map(x => (x.code||'').toUpperCase())).filter(c=>c && c!==target);
+
+  const codes  = uniqueBy(pool,x=>x.code)
+    .map(x=>x.code.toUpperCase())
+    .filter(c=>c && c!==target);
+
   const out = [];
 
-  // 1) realnie bliskie (DL <= 2)
   const realNear = codes
     .map(c => ({ c, d: dl(c, target) }))
     .filter(o => o.d <= 2)
@@ -168,7 +209,6 @@ export function buildCodeDistractors(correct, count, pool){
     if(!out.includes(c)) out.push(c);
   }
 
-  // 2) permutacje poprawnego kodu (co najmniej jedna)
   const need = Math.max(1, count - out.length);
   const perms = genRandomPermutations(target, need * 2);
   for(const p of perms){
@@ -176,19 +216,6 @@ export function buildCodeDistractors(correct, count, pool){
     if(!out.includes(p)) out.push(p);
   }
 
-  // 3) pojedyncze podmiany znaków (syntetyczne warianty)
-  if(out.length < count){
-    const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    for(let i=0; i<target.length && out.length<count; i++){
-      const ch = alphabet[Math.floor(Math.random()*alphabet.length)];
-      if(ch !== target[i]){
-        const v = target.slice(0,i) + ch + target.slice(i+1);
-        if(v !== target && dl(v,target) <= 2 && !out.includes(v)) out.push(v);
-      }
-    }
-  }
-
-  // 4) dociąg losowymi kodami z puli
   while(out.length < count && codes.length){
     const rnd = codes[Math.floor(Math.random()*codes.length)];
     if(rnd && !out.includes(rnd)) out.push(rnd);
@@ -199,13 +226,17 @@ export function buildCodeDistractors(correct, count, pool){
 
 // ===== DYSTRKTORY NAZW =====
 export function buildNameDistractors(correctName, count, pool){
-  const names = unique(pool.map(x=>x.name)).filter(n=>n && n!==correctName);
+  const names = unique(pool.map(x=>x.name))
+    .filter(n=>n && n!==correctName);
+
   const cTok  = sigTokens(tokenize(correctName));
 
   const scored = names.map(n=>{
     const t  = sigTokens(tokenize(n));
-    const A  = new Set(cTok), B = new Set(t);
-    let inter=0; for(const x of A) if(B.has(x)) inter++;
+    const A  = new Set(cTok);
+    const B  = new Set(t);
+    let inter=0;
+    for(const x of A) if(B.has(x)) inter++;
     const uni = new Set([...A,...B]).size;
     const jac = uni ? inter/uni : 0;
     const d   = dl(n,correctName);
@@ -217,21 +248,27 @@ export function buildNameDistractors(correctName, count, pool){
     if(out.length>=count) break;
     out.push(s.n);
   }
+
   while(out.length<count && names.length){
     const rnd = names[Math.floor(Math.random()*names.length)];
     if(rnd && !out.includes(rnd)) out.push(rnd);
   }
+
   return out.slice(0,count);
 }
 
-// ===== ZESTAW OPCJI DLA MC =====
+// ===== ZESTAW OPCJI MC =====
 export const buildCodeChoices = (correctCode, optsCount, pool) =>
-  shuffle(unique([correctCode, ...buildCodeDistractors(correctCode, Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
+  shuffle(unique([correctCode,
+    ...buildCodeDistractors(correctCode,
+      Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
 
 export const buildNameChoices = (correctName, optsCount, pool) =>
-  shuffle(unique([correctName, ...buildNameDistractors(correctName, Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
+  shuffle(unique([correctName,
+    ...buildNameDistractors(correctName,
+      Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
 
-// ===== POBIERANIE CUSTOMÓW =====
+// ===== CUSTOMY =====
 export function loadCustomRegionData(){
   try{
     const stored = localStorage.getItem('quizCustomRegions');
@@ -241,10 +278,13 @@ export function loadCustomRegionData(){
     Object.keys(o).forEach(id=>{
       const arr = o[id]?.data;
       if(Array.isArray(arr)){
-        arr.forEach(x=>{ if(x?.name && x?.code) all.push(x); });
+        arr.forEach(x=>{
+          if(x?.name && x?.code) all.push(x);
+        });
       }
     });
     return all;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
-``
