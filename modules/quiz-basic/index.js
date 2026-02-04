@@ -1,7 +1,4 @@
 // modules/quiz-basic/index.js
-// Podstawowy quiz (MC): nazwa→skrót, skrót→nazwa, mieszane
-// Kompatybilny ze wspólną logiką (shared/shared-logic.js)
-
 import {
   DEFAULT_REGION1,
   DEFAULT_REGION2,
@@ -15,7 +12,7 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root){
-  root.innerHTML = 
+  root.innerHTML = `
     <section class="card" id="setupCard">
       <h2>🎯 Podstawowy quiz</h2>
       <div class="grid" style="margin-top:10px;">
@@ -88,10 +85,9 @@ export function mount(root){
         <button id="qb_export">📥 Eksport CSV</button>
       </div>
     </section>
-  ;
+  `;
 
   const $ = sel => root.querySelector(sel);
-
   const STATE = { pool:[], questions:[], review:[], idx:0, ok:0, bad:0 };
 
   function buildPool(regionSel){
@@ -208,3 +204,4 @@ export function mount(root){
 }
 
 export function unmount(root){ root.innerHTML=''; }
+``
