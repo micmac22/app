@@ -2,9 +2,7 @@
 // SHARED LOGIC — Wspólna logika dla wszystkich modułów
 // =====================================================
 
-// ===============================
-// REGIONY (Twoje pełne dane)
-// ===============================
+// ===== REGIONY =====
 export const DEFAULT_REGION1 = [
   {"name":"Białobrzegi","code":"BIB"},{"name":"Bór","code":"BOR"},{"name":"Browar Belgia","code":"KB1"},
   {"name":"Busko Wełecz","code":"BUS"},{"name":"Busko Zdrój","code":"BUZ"},{"name":"Cegielnia Olesnica","code":"CO1"},
@@ -72,30 +70,20 @@ export const DEFAULT_REGION2 = [
   {"name":"Farma Wiatrowa Kraśnik","code":"FKR"}
 ];
 
-
-// ================================
-// HELPERY
-// ================================
+// ===== HELPERY =====
 export const norm = s => s.toString().trim().toLowerCase()
   .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
 
 export const stripSpaces = s => norm(s).replace(/\s+/g,"");
 export const shuffle = arr => { const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; };
-export const sample = (arr,k) => shuffle(arr).slice(0, Math.min(k, arr.length));
-export const unique = arr => Array.from(new Set(arr.filter(v=>v!=null)));
+export const sample  = (arr,k) => shuffle(arr).slice(0, Math.min(k, arr.length));
+export const unique  = arr => Array.from(new Set(arr.filter(v=>v!=null)));
 
-
-// ================================
-// Tokennizacja nazw
-// ================================
 export const COMMON_WORDS = new Set(['podstacja','trakcyjna','pkp','kolej','trakcja','pt']);
-export const tokenize = s => norm(s).split(/[^a-z0-9]+/g).filter(Boolean);
+export const tokenize  = s => norm(s).split(/[^a-z0-9]+/g).filter(Boolean);
 export const sigTokens = tokens => tokens.filter(t => !COMMON_WORDS.has(t) && t.length>1);
 
-
-// ================================
-// Damerau‑Levenshtein
-// ================================
+// ===== DL =====
 export function damerauLevenshtein(a,b){
   a = norm(a); b=norm(b); const m=a.length,n=b.length;
   if(!m) return n; if(!n) return m;
@@ -112,13 +100,9 @@ export function damerauLevenshtein(a,b){
   }
   return dp[m][n];
 }
-
 export const dl = (a,b) => damerauLevenshtein(a,b);
 
-
-// ================================
-// MATCH CODE
-// ================================
+// ===== MATCH CODE =====
 export function isCodeMatch(input, correct){
   const a = stripSpaces(input).toUpperCase();
   const b = stripSpaces(correct).toUpperCase();
@@ -128,10 +112,7 @@ export function isCodeMatch(input, correct){
   return damerauLevenshtein(a,b) <= 1;
 }
 
-
-// ================================
-// MATCH NAME
-// ================================
+// ===== MATCH NAME =====
 export function isNameMatch(input, correct){
   const A=norm(input), B=norm(correct);
   if(!A) return false;
@@ -153,10 +134,7 @@ export function isNameMatch(input, correct){
   return false;
 }
 
-
-// ================================
-// DYSTRKTORY KODÓW
-// ================================
+// ===== DYSTRKTORY KODÓW =====
 export function genRandomPermutations(s,count){
   const base=s.toUpperCase(), chars=base.split('');
   const out=new Set(); let guard=0;
@@ -174,53 +152,64 @@ export function genRandomPermutations(s,count){
 }
 
 export function buildCodeDistractors(correct, count, pool){
-  const target=stripSpaces(correct).toUpperCase();
-  const codes = unique(pool.map(x=>(x.code||'').toUpperCase())).filter(c=>c && c!==target);
+  const target = stripSpaces(correct).toUpperCase();
+  const codes  = unique(pool.map(x => (x.code||'').toUpperCase())).filter(c=>c && c!==target);
+  const out = [];
 
-  const realNear = codes.map(c=>({c, d:dl(c,target)}))
-    .filter(o=>o.d<=2)
-    .sort((a,b)=>a.d-b.d)
-    .map(o=>o.c);
+  // 1) realnie bliskie (DL <= 2)
+  const realNear = codes
+    .map(c => ({ c, d: dl(c, target) }))
+    .filter(o => o.d <= 2)
+    .sort((a,b) => a.d - b.d)
+    .map(o => o.c);
 
-  const out=[];
   for(const c of realNear){
-    if(out.length>=count) break;
+    if(out.length >= count) break;
     if(!out.includes(c)) out.push(c);
   }
 
-  const need = Math.max(1, count-out.length);
-  for(const p of genRandomPermutations(target, need*2)){
-    if(out.length>=count) break;
+  // 2) permutacje poprawnego kodu (co najmniej jedna)
+  const need = Math.max(1, count - out.length);
+  const perms = genRandomPermutations(target, need * 2);
+  for(const p of perms){
+    if(out.length >= count) break;
     if(!out.includes(p)) out.push(p);
-  out.length<count;i++){
+  }
+
+  // 3) pojedyncze podmiany znaków (syntetyczne warianty)
+  if(out.length < count){
+    const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    for(let i=0; i<target.length && out.length<count; i++){
       const ch = alphabet[Math.floor(Math.random()*alphabet.length)];
-      const v = target.slice(0,i)+ch+target.slice(i+1);
-      if(v!==target && dl(v,target)<=2 && !out.includes(v)) out.push(v);
+      if(ch !== target[i]){
+        const v = target.slice(0,i) + ch + target.slice(i+1);
+        if(v !== target && dl(v,target) <= 2 && !out.includes(v)) out.push(v);
+      }
     }
   }
 
-  while(out.length<count){
+  // 4) dociąg losowymi kodami z puli
+  while(out.length < count && codes.length){
     const rnd = codes[Math.floor(Math.random()*codes.length)];
     if(rnd && !out.includes(rnd)) out.push(rnd);
   }
-  return out.slice(0,count);
+
+  return out.slice(0, count);
 }
 
-
-// ================================
-// DYSTRKTORY NAZW
-// ================================
+// ===== DYSTRKTORY NAZW =====
 export function buildNameDistractors(correctName, count, pool){
   const names = unique(pool.map(x=>x.name)).filter(n=>n && n!==correctName);
-  const cTok = sigTokens(tokenize(correctName));
+  const cTok  = sigTokens(tokenize(correctName));
+
   const scored = names.map(n=>{
-    const t=sigTokens(tokenize(n));
-    const A=new Set(cTok), B=new Set(t);
+    const t  = sigTokens(tokenize(n));
+    const A  = new Set(cTok), B = new Set(t);
     let inter=0; for(const x of A) if(B.has(x)) inter++;
-    const uni=new Set([...A,...B]).size;
-    const jac = uni? inter/uni : 0;
-    const d=dl(n,correctName);
-    return {n, score: jac*2 - d/10};
+    const uni = new Set([...A,...B]).size;
+    const jac = uni ? inter/uni : 0;
+    const d   = dl(n,correctName);
+    return { n, score: jac*2 - d/10 };
   }).sort((a,b)=>b.score-a.score);
 
   const out=[];
@@ -228,27 +217,21 @@ export function buildNameDistractors(correctName, count, pool){
     if(out.length>=count) break;
     out.push(s.n);
   }
-  while(out.length<count){
+  while(out.length<count && names.length){
     const rnd = names[Math.floor(Math.random()*names.length)];
     if(rnd && !out.includes(rnd)) out.push(rnd);
   }
   return out.slice(0,count);
 }
 
-
-// ================================
-// ZESTAW OPCJI DLA MC
-// ================================
+// ===== ZESTAW OPCJI DLA MC =====
 export const buildCodeChoices = (correctCode, optsCount, pool) =>
   shuffle(unique([correctCode, ...buildCodeDistractors(correctCode, Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
 
 export const buildNameChoices = (correctName, optsCount, pool) =>
   shuffle(unique([correctName, ...buildNameDistractors(correctName, Math.max(1,optsCount-1), pool)])).slice(0, optsCount);
 
-
-// ================================
-// FUNKCJA: Pobieranie regionów niestandardowych
-// ================================
+// ===== POBIERANIE CUSTOMÓW =====
 export function loadCustomRegionData(){
   try{
     const stored = localStorage.getItem('quizCustomRegions');
@@ -256,7 +239,7 @@ export function loadCustomRegionData(){
     const o = JSON.parse(stored);
     const all=[];
     Object.keys(o).forEach(id=>{
-      const arr=o[id]?.data;
+      const arr = o[id]?.data;
       if(Array.isArray(arr)){
         arr.forEach(x=>{ if(x?.name && x?.code) all.push(x); });
       }
@@ -264,3 +247,4 @@ export function loadCustomRegionData(){
     return all;
   } catch { return []; }
 }
+``
