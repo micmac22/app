@@ -22,8 +22,20 @@ body {
   line-height: 1.6;
 }
 .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.app-menu {
+    padding: 20px;
+    background: var(--panel);
+    margin-top: 20px;
+    border-radius: 14px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
 
 /* ====== KARTY/UI ====== */
+
 .card {
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, .08);
@@ -123,5 +135,6 @@ button.success { background: var(--green); }
 #timer { color: var(--cyan); }
 #timer.warning { color: var(--orange); animation: pulse 1s infinite; }
 #timer.danger  { color: var(--red);    animation: pulse 0.5s infinite; }
+
 
 
