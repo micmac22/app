@@ -4,6 +4,10 @@
       "name": "Podstawowy quiz",
       "entry": "modules/quiz-basic/index.js"
     },
+    "expand": {
+      "name": "Rozszerzanie skrótów / Podaj skrót",
+      "entry": "modules/quiz-expand/index.js"
+    },
     "extreme": {
       "name": "Tryb ekstremalny",
       "entry": "modules/quiz-extreme/index.js"
@@ -16,9 +20,5 @@
       "name": "Klastrowanie skrótów",
       "entry": "modules/clusters/index.js"
     }
-    "expand": {
-  "name": "Rozszerzanie skrótów / podawanie skrótów",
-  "entry": "modules/quiz-expand/index.js"
-}
   }
 }
