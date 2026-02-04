@@ -16,5 +16,9 @@
       "name": "Klastrowanie skrótów",
       "entry": "modules/clusters/index.js"
     }
+    "expand": {
+  "name": "Rozszerzanie skrótów / podawanie skrótów",
+  "entry": "modules/quiz-expand/index.js"
+}
   }
 }
