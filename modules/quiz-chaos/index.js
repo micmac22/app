@@ -30,7 +30,7 @@ export function mount(root) {
         </label>
 
         <label>⏱️ Czas startowy (sekundy)
-          <input id="ch_time" type="number" min="3" max="300" value="10" />
+          <input id="ch_time" type="number" min="3" max="200" value="10" />
         </label>
       </div>
 
@@ -39,7 +39,7 @@ export function mount(root) {
       </div>
 
       <p class="muted" style="margin-top:8px;">
-        Zasady: dobra odpowiedź <strong>+0,75 s</strong>, zła <strong>−0,5 s</strong>. ENTER = zatwierdź i przejdź dalej.
+        Zasady: dobra odpowiedź <strong>+1,2s s</strong>, zła <strong>−0,75 s</strong>. ENTER = zatwierdź i przejdź dalej.
       </p>
     </section>
 
@@ -182,15 +182,15 @@ export function mount(root) {
     if (ok) {
       STATE.score += 1;
       $("#ch_score").textContent = STATE.score;
-      $("#ch_feedback").innerHTML = `<span style="color: var(--green); font-weight:600;">✔ +0,75 s</span>`;
-      if (!applyDeltaTime(+0.75)) return;
+      $("#ch_feedback").innerHTML = `<span style="color: var(--green); font-weight:600;">✔ +1,2 s</span>`;
+      if (!applyDeltaTime(+1.2)) return;
     } else {
       const corr =
         q.expect === "code"
           ? `<code>${q.correct}</code>`
           : `<strong>${q.correct}</strong>`;
-      $("#ch_feedback").innerHTML = `<span style="color: var(--red); font-weight:600;">✖ −0,50 s</span> &nbsp; <span class="muted">(poprawna: ${corr})</span>`;
-      if (!applyDeltaTime(-0.5)) return;
+      $("#ch_feedback").innerHTML = `<span style="color: var(--red); font-weight:600;">✖ −0,75 s</span> &nbsp; <span class="muted">(poprawna: ${corr})</span>`;
+      if (!applyDeltaTime(-0.75)) return;
     }
 
     // ENTER = zatwierdź i natychmiast następne pytanie
