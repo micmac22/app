@@ -46,7 +46,6 @@ export function mount(root) {
     <section class="card" id="ch_game" style="display:none;">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div class="stats-badge">✅ <span id="ch_score">0</span></div>
-        <!-- Używamy #timer, by wykorzystać Twoje style #timer/#timer.warning/#timer.danger -->
         <div id="timer" aria-live="polite">10.0</div>
       </div>
 
@@ -54,7 +53,8 @@ export function mount(root) {
         <div id="ch_stem" style="font-size:22px;font-weight:700;"></div>
       </div>
 
-      <input id="ch_input" type="text" placeholder="Twoja odpowiedź… (ENTER = zatwierdź)"
+      <input id="ch_input" type="text"
+             placeholder="Twoja odpowiedź… (ENTER = zatwierdź)"
              autocomplete="off" inputmode="latin" />
 
       <div id="ch_feedback" class="muted" style="margin-top:10px;"></div>
@@ -140,8 +140,8 @@ export function mount(root) {
     STATE.current = pickQuestion();
     $("#ch_stem").innerHTML = STATE.current.stem;
     $("#ch_input").value = "";
-    // Nie czyścimy feedbacku — pokazujemy wynik poprzedniej odpowiedzi, jak w trybach “szybkich”.
     $("#ch_input").focus();
+    // Feedback zostawiamy widoczny, żeby gracz widział wynik poprzedniej odpowiedzi
   }
 
   function endGame() {
@@ -165,7 +165,7 @@ export function mount(root) {
       STATE.time = 0;
       setTimerVisual(STATE.time);
       endGame();
-      return false; // przerwij flow
+      return false;
     }
     setTimerVisual(STATE.time);
     return true;
@@ -185,7 +185,6 @@ export function mount(root) {
       $("#ch_feedback").innerHTML = `<span style="color: var(--green); font-weight:600;">✔ +0,75 s</span>`;
       if (!applyDeltaTime(+0.75)) return;
     } else {
-      // Pokaż poprawną odpowiedź, ale nie zatrzymuj gry – Enter już idzie dalej.
       const corr =
         q.expect === "code"
           ? `<code>${q.correct}</code>`
@@ -194,7 +193,7 @@ export function mount(root) {
       if (!applyDeltaTime(-0.5)) return;
     }
 
-    // Od razu przejdź do następnego pytania (ENTER = zatwierdź i dalej).
+    // ENTER = zatwierdź i natychmiast następne pytanie
     renderQuestion();
   }
 
@@ -247,7 +246,6 @@ export function mount(root) {
   });
 
   $("#ch_again").onclick = () => {
-    // Powrót do ekranu startowego (jak w basic)
     if (STATE.timerId) {
       clearInterval(STATE.timerId);
       STATE.timerId = null;
@@ -260,13 +258,10 @@ export function mount(root) {
 }
 
 export function unmount(root) {
-  // Bezpiecznie zatrzymaj timer i wyczyść DOM
-  try {
-    const timerEl = root.querySelector("#timer");
-    // nic nie trzeba czyścić na elemencie, ale czyścimy interwał:
-  } catch {}
+  // Zatrzymaj interwały i wyczyść DOM
   root.innerHTML = "";
 }
 
-// Dodatkowo default export – dla zgodności z różnymi loaderami w app.js
+// Dodatkowo default export – będzie też działać, jeśli kiedyś zmienisz loader na mod.default
 export default { mount, unmount };
+``
