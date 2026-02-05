@@ -58,6 +58,7 @@ export function mount(root) {
     board: [],
     revealed: [],
     flagged: [],
+    firstClick: true,
     timer: 0,
     timerId: null,
     gameOver: false,
@@ -84,19 +85,20 @@ export function mount(root) {
     }
   }
 
-  function generateBoard() {
+  // GENEROWANIE Z UWZGLĘDNIENIEM 1 KLIKNIĘCIA
+  function generateBoard(safeX, safeY) {
     const size = STATE.size;
     const bombs = STATE.bombs;
 
     STATE.board = Array.from({length:size},()=>Array(size).fill(0));
-    STATE.revealed = Array.from({length:size},()=>Array(size).fill(false));
-    STATE.flagged  = Array.from({length:size},()=>Array(size).fill(false));
-    STATE.gameOver = false;
 
     let b = bombs;
     while (b>0) {
       const x = Math.floor(Math.random()*size);
       const y = Math.floor(Math.random()*size);
+
+      if ((x === safeX && y === safeY)) continue;
+
       if (STATE.board[y][x] !== "B") {
         STATE.board[y][x] = "B";
         b--;
@@ -123,14 +125,13 @@ export function mount(root) {
   }
 
   function drawBoard() {
-    const size = STATE.size;
     const board = $("#sap_board");
-    board.style.gridTemplateColumns = `repeat(${size}, 32px)`;
-    board.style.gridTemplateRows    = `repeat(${size}, 32px)`;
+    board.style.gridTemplateColumns = `repeat(${STATE.size}, 32px)`;
+
     board.innerHTML = "";
 
-    for (let y=0; y<size; y++) {
-      for (let x=0; x<size; x++) {
+    for (let y=0; y<STATE.size; y++) {
+      for (let x=0; x<STATE.size; x++) {
         const cell = document.createElement("div");
         cell.dataset.x = x;
         cell.dataset.y = y;
@@ -140,12 +141,11 @@ export function mount(root) {
         cell.style.display = "flex";
         cell.style.alignItems = "center";
         cell.style.justifyContent = "center";
-        cell.style.userSelect = "none";
         cell.style.background = "#e5e7eb";
         cell.style.border = "1px solid #cbd5e1";
         cell.style.cursor = "pointer";
         cell.style.fontWeight = "700";
-        cell.style.fontSize = "18px";
+        cell.style.fontSize = "17px";
         board.appendChild(cell);
       }
     }
@@ -159,7 +159,6 @@ export function mount(root) {
 
     for (let y=0; y<size; y++) {
       for (let x=0; x<size; x++) {
-
         const cell = $("#sap_board").children[y*size + x];
         const r = STATE.revealed[y][x];
         const f = STATE.flagged[y][x];
@@ -168,20 +167,18 @@ export function mount(root) {
         if (f) flags++;
 
         if (STATE.gameOver && v === "B") {
-          cell.style.background = "#f87171";
           cell.textContent = "💣";
+          cell.style.background = "#f87171";
           continue;
         }
 
         if (r) {
           cell.style.background = "#f1f5f9";
-          cell.style.cursor = "default";
-
           if (v === 0) {
             cell.textContent = "";
-          } else if (v > 0) {
+          } else {
             cell.textContent = v;
-            cell.style.color = "#1e3a8a";
+            cell.style.color = "#1d4ed8";
           }
         } else if (f) {
           cell.textContent = "🚩";
@@ -195,17 +192,20 @@ export function mount(root) {
     $("#sap_left").textContent = STATE.bombs - flags;
   }
 
+  // ODSŁANIANIE
   function reveal(x,y) {
     if (STATE.revealed[y][x] || STATE.flagged[y][x] || STATE.gameOver) return;
+
+    // PIERWSZY KLIK ZAWSZE BEZ BOMBY
+    if (STATE.firstClick) {
+      STATE.firstClick = false;
+      generateBoard(x,y);
+    }
 
     STATE.revealed[y][x] = true;
 
     if (STATE.board[y][x] === "B") {
-      // 🔥 KLUCZOWA POPRAWKA: odsłaniamy bombę
-      STATE.revealed[y][x] = true;
-
       gameOver(false);
-      updateDisplay();
       return;
     }
 
@@ -227,11 +227,11 @@ export function mount(root) {
     STATE.gameOver = true;
     stopTimer();
 
-    // 🔥 ODSŁONIĘCIE WSZYSTKICH BOMB
-    for (let yy = 0; yy < STATE.size; yy++) {
-      for (let xx = 0; xx < STATE.size; xx++) {
-        if (STATE.board[yy][xx] === "B") {
-          STATE.revealed[yy][xx] = true;
+    // pokaż wszystkie bomby
+    for (let y=0; y<STATE.size; y++) {
+      for (let x=0; x<STATE.size; x++) {
+        if (STATE.board[y][x] === "B") {
+          STATE.revealed[y][x] = true;
         }
       }
     }
@@ -244,7 +244,7 @@ export function mount(root) {
       $("#sap_end_status").textContent = "Udało się!";
     } else {
       $("#sap_end_title").textContent = "💥 Przegrana!";
-      $("#sap_end_status").textContent = "Trafiona bomba!";
+      $("#sap_end_status").textContent = "Trafiłeś bombę!";
     }
 
     $("#sap_end_time").textContent = STATE.timer.toFixed(1);
@@ -252,10 +252,14 @@ export function mount(root) {
     updateDisplay();
   }
 
+  // ----------- ZDARZENIA -----------
+
   $("#sap_board").addEventListener("click", (e)=>{
     if (STATE.gameOver) return;
+
     const cell = e.target;
     if (!cell.dataset.x) return;
+
     const x = +cell.dataset.x;
     const y = +cell.dataset.y;
 
@@ -268,8 +272,8 @@ export function mount(root) {
   $("#sap_board").addEventListener("contextmenu", (e)=>{
     e.preventDefault();
     if (STATE.gameOver) return;
+
     const cell = e.target;
-    if (!cell.dataset.x) return;
     const x = +cell.dataset.x;
     const y = +cell.dataset.y;
 
@@ -282,9 +286,13 @@ export function mount(root) {
 
   $("#sap_start").onclick = () => {
     STATE.size = parseInt($("#sap_size").value);
-    STATE.bombs = Math.max(5, Math.min(150, parseInt($("#sap_bombs").value)||20));
+    STATE.bombs = parseInt($("#sap_bombs").value);
+    STATE.firstClick = true;
 
-    generateBoard();
+    STATE.revealed = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    STATE.flagged = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    STATE.gameOver = false;
+
     drawBoard();
     startTimer();
 
@@ -301,9 +309,14 @@ export function mount(root) {
   };
 
   $("#sap_restart").onclick = () => {
-    generateBoard();
+    STATE.firstClick = true;
+    STATE.revealed = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    STATE.flagged = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    STATE.gameOver = false;
+
     drawBoard();
     startTimer();
+
     $("#saper_game").style.display = "block";
     $("#saper_end").style.display = "none";
   };
