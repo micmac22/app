@@ -35,6 +35,12 @@ body {
 }
 
 /* ====== KARTY/UI ====== */
+.sap_cell {
+  transition: background 0.15s, color 0.15s;
+}
+.sap_cell:hover {
+  filter: brightness(1.1);
+}
 
 .card {
   background: var(--panel);
@@ -135,6 +141,7 @@ button.success { background: var(--green); }
 #timer { color: var(--cyan); }
 #timer.warning { color: var(--orange); animation: pulse 1s infinite; }
 #timer.danger  { color: var(--red);    animation: pulse 0.5s infinite; }
+
 
 
 
