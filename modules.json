@@ -20,7 +20,8 @@
     },
     "clusters": {
       "name": "Klastrowanie skrótów",
-      "entry": "modules/clusters/index.js"
+      "entry": "modules/clusters/index.js",
+      "hidden": true
     }
   }
 }
