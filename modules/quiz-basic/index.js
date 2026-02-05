@@ -2,13 +2,13 @@ import {
   DEFAULT_REGION1,
   DEFAULT_REGION2,
   norm,
-  isNameMatch,
-  isCodeMatch,
+  isNameMatch,   // używane tylko do generowania pytań? (tu MC porównuje ściśle)
+  isCodeMatch,   // jw.
   sample,
   buildCodeChoices,
   buildNameChoices,
   loadCustomRegionData,
-  // pomocnicze z shared (do podobieństwa)
+  // pomocnicze z shared (do podobieństwa / tworzenia dystraktorów)
   tokenize,
   dl
 } from "../../shared/shared-logic.js";
@@ -108,8 +108,7 @@ export function mount(root){
     // czas
     sessionStart: 0,
     sessionTimerId: null,
-    times: [], // czasy poszczególnych pytań
-    // referencje do przycisków odpowiedzi
+    times: [], // czasy poszczególnych pytań (sek)
     answerButtons: []
   };
 
@@ -132,6 +131,15 @@ export function mount(root){
   }
 
   // ====== UTRUDNIENIE DYSTRAKTORÓW ======
+
+  function shuffleArray(arr){
+    const a=[...arr];
+    for(let i=a.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
 
   function firstLetterName(s){
     const t = norm(s);
@@ -163,8 +171,6 @@ export function mount(root){
       .map(x=> (x.code || '').toUpperCase())
       .filter(c => c && c !== correctCode.toUpperCase() && firstLetterCode(c) === fl);
 
-    // nie ma sensu liczyć DL na tak krótkich ciągach — po prostu wybierz losowo
-    // (ale stabilnie posortuj by nieco deterministycznie)
     return Array.from(new Set(cand)).slice(0, need);
   }
 
@@ -201,13 +207,11 @@ export function mount(root){
   // Ulepszanie wyborów NAZW: zapewnij co najmniej 1 dystraktor z tej samej pierwszej litery
   function enhanceNameChoices(choices, correctName, pool, optsCount){
     const out = new Set(choices);
-    // policz ile już mamy z tą samą pierwszą literą (wyłącz poprawną)
     const fl = firstLetterName(correctName);
     const sameFirstInChoices = [...out].filter(n => n !== correctName && firstLetterName(n) === fl);
     if(sameFirstInChoices.length === 0){
       const [cand] = similarNamesSameFirst(correctName, pool, 1);
       if(cand && !out.has(cand) && cand !== correctName){
-        // zamień jakiś istniejący dystraktor (pierwszy niepoprawny)
         for(const v of out){
           if(v !== correctName){
             out.delete(v);
@@ -217,16 +221,15 @@ export function mount(root){
         }
       }
     }
-    // przytnij do docelowej liczby opcji
     return shuffleArray([...out]).slice(0, optsCount);
   }
 
-  // Ulepszanie wyborów KODÓW: dołóż (jeśli trzeba) dystraktor z tej samej pierwszej litery i syntetyczny
+  // Ulepszanie wyborów KODÓW
   function enhanceCodeChoices(choices, correctCode, correctName, pool, optsCount){
     let set = new Set(choices.map(c => (c || '').toUpperCase()));
-    const upperCorrect = correctCode.toUpperCase();
+    const upperCorrect = (correctCode || '').toUpperCase();
 
-    // 1) zapwenij dystraktor zaczynający się jak poprawny
+    // 1) zapewnij dystraktor zaczynający się jak poprawny
     const sameFirst = similarCodesSameFirst(upperCorrect, pool, 3);
     const hasSameFirst = [...set].some(c => c !== upperCorrect && firstLetterCode(c) === firstLetterCode(upperCorrect));
     if(!hasSameFirst && sameFirst.length){
@@ -242,7 +245,6 @@ export function mount(root){
     // 2) syntetyczny dystraktor (mix / 3-lit)
     const synth = syntheticCodeDistractor(upperCorrect, correctName);
     if(synth && !set.has(synth) && synth !== upperCorrect){
-      // jeżeli pełno — zamień któryś dystraktor
       if(set.size >= optsCount){
         for(const swap of set){
           if(swap !== upperCorrect){
@@ -254,22 +256,11 @@ export function mount(root){
       set.add(synth);
     }
 
-    // docięcie i wymieszanie
     const out = shuffleArray([...set]).slice(0, optsCount);
-    // upewnij się, że poprawna odpowiedź jest na liście
     if(!out.includes(upperCorrect)){
       out[Math.floor(Math.random()*out.length)] = upperCorrect;
     }
     return out;
-  }
-
-  function shuffleArray(arr){
-    const a=[...arr];
-    for(let i=a.length-1;i>0;i--){
-      const j=Math.floor(Math.random()*(i+1));
-      [a[i],a[j]]=[a[j],a[i]];
-    }
-    return a;
   }
 
   // ====== GENERATOR PYTAŃ ======
@@ -284,11 +275,12 @@ export function mount(root){
         let choices = buildCodeChoices(code, opts, pool);
         choices = enhanceCodeChoices(choices, code, name, pool, opts);
         if(choices.length<opts) choices=[...choices,code];
+
         return {
           type:'mc',
           dir,
           stem:`Jaki skrót ma stacja <strong>${name}</strong>?`,
-          correct:code.toUpperCase(),
+          correct: (code || '').toUpperCase(),
           expect:'code',
           choices: choices.map(c => (c || '').toUpperCase()),
           _answered:false,
@@ -300,6 +292,7 @@ export function mount(root){
         let choices = buildNameChoices(name, opts, pool);
         choices = enhanceNameChoices(choices, name, pool, opts);
         if(choices.length<opts) choices=[...choices,name];
+
         return {
           type:'mc',
           dir,
@@ -354,7 +347,7 @@ export function mount(root){
       const btn = document.createElement('button');
       btn.className='choice';
       btn.textContent=choice;
-      btn.dataset.index = String(idx+1); // do skrótów 1–6
+      btn.dataset.index = String(idx+1); // skróty 1–6
       btn.onclick = ()=>selectMC(q, btn, choice);
       answers.appendChild(btn);
       STATE.answerButtons.push(btn);
@@ -363,29 +356,38 @@ export function mount(root){
     renderProgress();
   }
 
+  // === MC: ścisłe porównanie (BEZ fuzzy) ===
+  function isChoiceEqual(q, value) {
+    if (q.expect === 'code') {
+      return String(value).trim().toUpperCase() === String(q.correct).trim().toUpperCase();
+    }
+    return String(value).trim() === String(q.correct).trim();
+  }
+
   function selectMC(q, btn, value){
     if(q._answered) return;
-    q._answered=true;
+    q._answered = true;
 
-    const ok = q.expect==='code'
-      ? isCodeMatch(value, q.correct)
-      : isNameMatch(value, q.correct);
+    const ok = isChoiceEqual(q, value);
 
     // zmierz czas
     q._dt = Math.max(0, (performance.now() - q._t0)/1000);
     STATE.times.push(q._dt);
 
+    // Zablokuj wszystkie i wyczyść klasy
+    const all = [...$('#qb_answers').querySelectorAll('.choice')];
+    all.forEach(b => {
+      b.disabled = true;
+      b.classList.remove('correct', 'wrong');
+    });
+
+    // Podświetl kliknięty
     if(ok){ STATE.ok++; btn.classList.add('correct'); }
     else  { STATE.bad++; btn.classList.add('wrong'); }
 
-    // ujawnij poprawną
-    [...$('#qb_answers').querySelectorAll('.choice')].forEach(b=>{
-      b.disabled=true;
-      const match = q.expect==='code'
-        ? isCodeMatch(b.textContent,q.correct)
-        : isNameMatch(b.textContent,q.correct);
-      if(match) b.classList.add('correct');
-    });
+    // Podświetl WYŁĄCZNIE jedną poprawną (ścisła równość)
+    const correctBtn = all.find(b => isChoiceEqual(q, b.textContent));
+    if (correctBtn) correctBtn.classList.add('correct');
 
     // feedback
     $('#qb_feedback').innerHTML = ok
@@ -477,7 +479,6 @@ export function mount(root){
     if(!quizVisible) return;
 
     if(e.key === 'Enter'){
-      // przejście dalej tylko jeśli bieżące pytanie już sprawdzone
       const q = STATE.questions[STATE.idx];
       if(q?._answered){
         e.preventDefault(); e.stopPropagation();
@@ -486,7 +487,6 @@ export function mount(root){
       return;
     }
 
-    // 1–6: wybór opcji
     if(/^[1-6]$/.test(e.key)){
       const idx = parseInt(e.key,10)-1;
       const btn = STATE.answerButtons[idx];
@@ -497,12 +497,10 @@ export function mount(root){
     }
   }
   window.addEventListener('keydown', onKeydown);
-  // zapamiętaj referencję do cleanupu w unmount:
   root.__onKeydownBasic = onKeydown;
 }
 
 export function unmount(root){
-  // zdejmij listener klawiatury
   if(root.__onKeydownBasic){
     window.removeEventListener('keydown', root.__onKeydownBasic);
     delete root.__onKeydownBasic;
