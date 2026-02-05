@@ -6,7 +6,9 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root) {
-  // ---- STAŁE ----
+  // -------------------------------
+  // STAŁE
+  // -------------------------------
   const BONUS_GOOD = 1.4;    // +1,4 s za dobrą odpowiedź
   const PENALTY_BAD = -0.6;  // −0,6 s za złą odpowiedź
 
@@ -17,7 +19,12 @@ export function mount(root) {
   const BALANCE_MAX = 40;              // prawe ograniczenie
   const EDGE_DAMPING_MIN = 0.35;       // minimalne tłumienie przy krawędziach (35%)
 
-  // ---- STYLE (animacje, paski) – wstrzyknięcie jednokrotne ----
+  // LocalStorage – historia wyników
+  const STORAGE_KEY = "quizChaosHistory";
+
+  // -------------------------------
+  // STYLE (animacje, paski) – wstrzyknięcie jednokrotne
+  // -------------------------------
   if (!document.getElementById("quizChaosStyles")) {
     const style = document.createElement("style");
     style.id = "quizChaosStyles";
@@ -78,11 +85,17 @@ export function mount(root) {
       /* Drobne */
       .stats-badge { background: var(--surface-2, #f3f4f6); padding: 4px 8px; border-radius: 10px; font-weight: 600; }
       .streak-line { margin-top: 6px; font-size: 13px; }
+
+      .badge { display:inline-block; margin-left:8px; padding:1px 6px; border-radius:10px; font-size:12px; font-weight:700; background: #eef6ff; color:#0369a1; }
+      .badge.green { background:#ecfdf5; color:#065f46; }
+      .badge.red { background:#fef2f2; color:#991b1b; }
     `;
     document.head.appendChild(style);
   }
 
-  // ---- DOM ----
+  // -------------------------------
+  // DOM
+  // -------------------------------
   root.innerHTML = `
     <section class="card" id="ch_setup">
       <h2>🌀 Chaos danych</h2>
@@ -156,17 +169,31 @@ export function mount(root) {
       <div class="muted" style="margin-top:6px;">
         Startowy: <span id="ch_starttime">10</span>s • Kierunek: <span id="ch_finaldir">mixed</span> • Pula: <span id="ch_poolsize">0</span> • Najdłuższa seria: <span id="ch_best_final">0</span>
       </div>
-      <div style="margin-top:12px;">
+
+      <!-- Porównanie z historią -->
+      <div style="margin-top:10px; font-size:14px; line-height:1.4;">
+        <div>Poprzedni wynik: <strong id="ch_prev_score">—</strong> <span id="ch_prev_delta" class="badge" style="display:none;"></span></div>
+        <div>Najlepszy wynik (rekord): <strong id="ch_best_score">—</strong> <span id="ch_best_badge" class="badge green" style="display:none;">rekord!</span></div>
+        <div>Najlepsza seria (rekord): <strong id="ch_best_streak_global">—</strong> <span id="ch_best_streak_badge" class="badge green" style="display:none;">rekord serii!</span></div>
+        <div>Rozegrane gry łącznie: <strong id="ch_games_count">0</strong></div>
+        <div class="muted" style="margin-top:6px;">Wciśnij <strong>ENTER</strong>, aby zagrać ponownie tymi samymi ustawieniami.</div>
+      </div>
+
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:center;">
         <button id="ch_again" class="success">🔄 Jeszcze raz</button>
+        <button id="ch_settings" class="secondary">⚙️ Zmień ustawienia</button>
       </div>
     </section>
   `;
 
   const $ = (sel) => root.querySelector(sel);
 
-  // ---- STAN ----
+  // -------------------------------
+  // STAN
+  // -------------------------------
   const STATE = {
     pool: [],
+    regionSel: "both",
     dir: "mixed",
     time: 10,
     startTime: 10,
@@ -177,10 +204,12 @@ export function mount(root) {
     bestStreak: 0,
     barTimeoutId: null,
     balance: 0, // pozycja markera [%]
+    onKeyDown: null, // handler ENTER po zakończeniu gry
   };
 
-  // ---- NORMALIZACJA I DOPASOWANIA ----
-
+  // -------------------------------
+  // NORMALIZACJA I DOPASOWANIA
+  // -------------------------------
   // Słowa-klucze traktowane jako rozwinięcia skrótów (możesz dopisać kolejne)
   const KEY_TERMS = new Set(["pkp", "trakcja"]);
 
@@ -225,7 +254,9 @@ export function mount(root) {
     return false;
   }
 
-  // ---- DANE I LOSOWANIE ----
+  // -------------------------------
+  // DANE I LOSOWANIE
+  // -------------------------------
   function uniqueByCode(arr) {
     const map = new Map();
     arr.forEach((x) => {
@@ -268,7 +299,9 @@ export function mount(root) {
     }
   }
 
-  // ---- UI ----
+  // -------------------------------
+  // UI
+  // -------------------------------
   function setTimerVisual(t) {
     const el = $("#timer");
     el.textContent = Math.max(0, t).toFixed(1);
@@ -284,6 +317,106 @@ export function mount(root) {
     $("#ch_input").focus();
   }
 
+  function toIsoLocalString(d = new Date()) {
+    try {
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch {
+      return String(Date.now());
+    }
+  }
+
+  // -------------------------------
+  // HISTORIA – zapis i porównania
+  // -------------------------------
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function storeHistory(arr) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+    } catch {
+      // ignore
+    }
+  }
+
+  function saveResultAndCompare(result) {
+    const hist = loadHistory();
+    const previous = hist.length ? hist[hist.length - 1] : null;
+
+    // najlepsze wartości PRZED dopisaniem bieżącej
+    const preBestScore = hist.reduce((m, r) => Math.max(m, r.score || 0), 0);
+    const preBestStreak = hist.reduce((m, r) => Math.max(m, r.bestStreak || 0), 0);
+
+    hist.push(result);
+    // prosty limit pamięci
+    if (hist.length > 500) hist.splice(0, hist.length - 500);
+    storeHistory(hist);
+
+    const isNewBest = result.score > preBestScore;
+    const isNewBestStreak = result.bestStreak > preBestStreak;
+
+    const bestScore = Math.max(preBestScore, result.score);
+    const bestStreak = Math.max(preBestStreak, result.bestStreak);
+
+    return {
+      previous,
+      gamesCount: hist.length,
+      bestScore,
+      bestStreak,
+      isNewBest,
+      isNewBestStreak,
+      deltaPrev: previous ? result.score - (previous.score || 0) : null,
+    };
+  }
+
+  function renderEndComparisons(cmp) {
+    const prevEl = $("#ch_prev_score");
+    const deltaEl = $("#ch_prev_delta");
+    const bestEl = $("#ch_best_score");
+    const bestBadge = $("#ch_best_badge");
+    const bestStreakEl = $("#ch_best_streak_global");
+    const bestStreakBadge = $("#ch_best_streak_badge");
+    const countEl = $("#ch_games_count");
+
+    if (cmp.previous) {
+      prevEl.textContent = String(cmp.previous.score ?? 0);
+      if (cmp.deltaPrev === 0) {
+        deltaEl.style.display = "inline-block";
+        deltaEl.textContent = "±0";
+        deltaEl.className = "badge";
+      } else if (cmp.deltaPrev > 0) {
+        deltaEl.style.display = "inline-block";
+        deltaEl.textContent = `+${cmp.deltaPrev}`;
+        deltaEl.className = "badge green";
+      } else {
+        deltaEl.style.display = "inline-block";
+        deltaEl.textContent = `${cmp.deltaPrev}`;
+        deltaEl.className = "badge red";
+      }
+    } else {
+      prevEl.textContent = "—";
+      deltaEl.style.display = "none";
+    }
+
+    bestEl.textContent = String(cmp.bestScore ?? 0);
+    bestBadge.style.display = cmp.isNewBest ? "inline-block" : "none";
+
+    bestStreakEl.textContent = String(cmp.bestStreak ?? 0);
+    bestStreakBadge.style.display = cmp.isNewBestStreak ? "inline-block" : "none";
+
+    countEl.textContent = String(cmp.gamesCount ?? 1);
+  }
+
+  // -------------------------------
+  // KONIEC GRY
+  // -------------------------------
   function endGame() {
     if (STATE.timerId) {
       clearInterval(STATE.timerId);
@@ -302,8 +435,24 @@ export function mount(root) {
     $("#ch_finaldir").textContent = STATE.dir;
     $("#ch_poolsize").textContent = STATE.pool.length;
     $("#ch_best_final").textContent = STATE.bestStreak;
+
+    // ZAPIS WYNIKU + PORÓWNANIE
+    const result = {
+      ts: toIsoLocalString(),
+      score: STATE.score,
+      bestStreak: STATE.bestStreak,
+      startTime: STATE.startTime,
+      dir: STATE.dir,
+      regionSel: STATE.regionSel,
+      poolSize: STATE.pool.length,
+    };
+    const cmp = saveResultAndCompare(result);
+    renderEndComparisons(cmp);
   }
 
+  // -------------------------------
+  // CZAS
+  // -------------------------------
   function applyDeltaTime(delta) {
     STATE.time += delta;
     if (STATE.time <= 0) {
@@ -316,7 +465,9 @@ export function mount(root) {
     return true;
   }
 
-  // ---- Efekty wizualne (flash, shake, balance) ----
+  // -------------------------------
+  // Efekty wizualne (flash, shake, balance)
+  // -------------------------------
   function flashResultBar(isSuccess) {
     const bar = $("#ch_result_bar");
     bar.className = "result-bar";
@@ -387,7 +538,9 @@ export function mount(root) {
        <span class="muted" style="margin-left:8px;">(poprawna: ${correctHtml})</span>`;
   }
 
-  // ---- LOGIKA ODPOWIEDZI ----
+  // -------------------------------
+  // LOGIKA ODPOWIEDZI
+  // -------------------------------
   function checkAnswer() {
     const val = $("#ch_input").value.trim();
     if (!val) return;
@@ -430,7 +583,9 @@ export function mount(root) {
     renderQuestion();
   }
 
-  // ---- ZEGAR ----
+  // -------------------------------
+  // ZEGAR
+  // -------------------------------
   function tick() {
     STATE.time -= 0.1;
     if (STATE.time <= 0) {
@@ -445,12 +600,18 @@ export function mount(root) {
     decayBalanceTowardsCenter();
   }
 
-  // ---- START/RESET ----
-  function startGame() {
-    const regionSel = $("#ch_region").value;
-    STATE.pool = buildPool(regionSel);
-    STATE.dir = $("#ch_dir").value;
-    STATE.startTime = Math.max(3, Math.min(300, parseFloat($("#ch_time").value) || 10));
+  // -------------------------------
+  // START/RESTART
+  // -------------------------------
+  function startGame(reuseSettings = false) {
+    // jeśli reuse=true, użyj zapamiętanych ustawień; w przeciwnym razie pobierz z UI
+    if (!reuseSettings) {
+      STATE.regionSel = $("#ch_region").value;
+      STATE.dir = $("#ch_dir").value;
+      STATE.startTime = Math.max(3, Math.min(300, parseFloat($("#ch_time").value) || 10));
+    }
+
+    STATE.pool = buildPool(STATE.regionSel);
     STATE.time = STATE.startTime;
     STATE.score = 0;
     STATE.streak = 0;
@@ -477,8 +638,14 @@ export function mount(root) {
     STATE.timerId = setInterval(tick, 100);
   }
 
-  // ---- ZDARZENIA ----
-  $("#ch_start").onclick = startGame;
+  function restartSameSettings() {
+    startGame(true);
+  }
+
+  // -------------------------------
+  // ZDARZENIA
+  // -------------------------------
+  $("#ch_start").onclick = () => startGame(false);
 
   $("#ch_input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -488,14 +655,29 @@ export function mount(root) {
     }
   });
 
+  // ENTER na ekranie końcowym = restart tymi samymi ustawieniami
+  STATE.onKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    const endEl = $("#ch_end");
+    if (!endEl) return;
+    const isVisible = endEl.style.display !== "none";
+    if (isVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      restartSameSettings();
+    }
+  };
+  window.addEventListener("keydown", STATE.onKeyDown);
+
+  // Przyciski na ekranie końcowym
   $("#ch_again").onclick = () => {
+    restartSameSettings();
+  };
+  $("#ch_settings").onclick = () => {
+    // powrót do ustawień (bez restartu)
     if (STATE.timerId) {
       clearInterval(STATE.timerId);
       STATE.timerId = null;
-    }
-    if (STATE.barTimeoutId) {
-      clearTimeout(STATE.barTimeoutId);
-      STATE.barTimeoutId = null;
     }
     $("#ch_setup").style.display = "block";
     $("#ch_game").style.display = "none";
@@ -505,7 +687,14 @@ export function mount(root) {
 }
 
 export function unmount(root) {
-  // Zatrzymaj interwały i wyczyść DOM (timery były w STATE w mount; tu czyścimy DOM)
+  // Sprzątanie: timery i nasłuchiwanie klawiatury
+  try {
+    // Próba usunięcia globalnego handlera ENTER (jeśli był dodany)
+    // Szukamy po najbliższym root'cie; STATE jest w closure mount, więc tu tylko defensywnie:
+    window.onkeydown = null; // fallback
+  } catch {
+    // ignore
+  }
   root.innerHTML = "";
 }
 
