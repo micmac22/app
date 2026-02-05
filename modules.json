@@ -8,10 +8,10 @@
       "name": "Rozszerzanie skrótów / Podaj skrót",
       "entry": "modules/quiz-expand/index.js"
     },
-    "extreme": {
+//    "extreme": {
       "name": "Tryb ekstremalny",
       "entry": "modules/quiz-extreme/index.js"
-    },
+    },//
     "chaos": {
       "name": "Chaos danych",
       "entry": "modules/quiz-chaos/index.js"
