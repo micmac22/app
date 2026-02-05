@@ -10,12 +10,13 @@
     },
     "extreme": {
       "name": "Tryb ekstremalny",
-      "entry": "modules/quiz-extreme/index.js"
+      "entry": "modules/quiz-extreme/index.js",
+        "hidden": true
     },
     "chaos": {
       "name": "Chaos danych",
-      "entry": "modules/quiz-chaos/index.js",
-      "hidden": true
+      "entry": "modules/quiz-chaos/index.js"
+    
     },
     "clusters": {
       "name": "Klastrowanie skrótów",
