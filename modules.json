@@ -18,6 +18,11 @@
       "entry": "modules/quiz-chaos/index.js"
     
     },
+      "saper": {
+      "name": "Saper",
+      "entry": "modules/saper/index.js"
+    
+    },
     "clusters": {
       "name": "Klastrowanie skrótów",
       "entry": "modules/clusters/index.js",
