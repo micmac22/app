@@ -94,19 +94,20 @@ async function init() {
   menu.innerHTML = "";
 
   // Zbuduj przyciski
-  for (const key in modules) {
-    const { name, entry } = modules[key];
-    const btn = document.createElement("button");
-    btn.textContent = name;
-    btn.onclick = () => mountModule(entry, btn);
-    menu.appendChild(btn);
+for (const key in modules) {
+  const modInfo = modules[key];
 
-    // Opcjonalny prefetch (asynchronicznie)
-    // import("./" + entry).catch(() => {});
-  }
+  if (modInfo.hidden) continue;   // ⬅️ IGNORUJ UKRYTE MODUŁY
+
+  const btn = document.createElement("button");
+  btn.textContent = modInfo.name;
+  btn.onclick = () => mountModule(modInfo.entry, btn);
+  menu.appendChild(btn);
+}
 }
 
 init();
 
 // (Opcjonalnie) Eksportuj mountModule do debugowania z konsoli
 // window.mountModule = mountModule;
+
