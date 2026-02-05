@@ -100,17 +100,18 @@ export function mount(root){
   const $ = sel => root.querySelector(sel);
 
   const STATE = {
-    pool:[],
-    questions:[],
-    idx:0,
-    ok:0,
-    bad:0,
-    // czas
-    sessionStart: 0,
-    sessionTimerId: null,
-    times: [], // czasy poszczególnych pytań (sek)
-    answerButtons: []
-  };
+  pool:[],
+  questions:[],
+  idx:0,
+  ok:0,
+  bad:0,
+  // czas
+  sessionStart: 0,
+  sessionTimerId: null,
+  times: [], // czasy poszczególnych pytań (sek)
+  answerButtons: [],
+  autoNextT: null // ⬅️ timer auto-przejścia
+};
 
   function uniqueByCode(arr){
     const map=new Map();
@@ -364,54 +365,56 @@ export function mount(root){
     return String(value).trim() === String(q.correct).trim();
   }
 
-  function selectMC(q, btn, value){
-    if(q._answered) return;
-    q._answered = true;
+function selectMC(q, btn, value){
+  if(q._answered) return;
+  q._answered = true;
 
-    const ok = isChoiceEqual(q, value);
+  const ok = isChoiceEqual(q, value);
 
-    // zmierz czas
-    q._dt = Math.max(0, (performance.now() - q._t0)/1000);
-    STATE.times.push(q._dt);
+  // zmierz czas
+  q._dt = Math.max(0, (performance.now() - q._t0)/1000);
+  STATE.times.push(q._dt);
 
-    // Zablokuj wszystkie i wyczyść klasy
-    const all = [...$('#qb_answers').querySelectorAll('.choice')];
-    all.forEach(b => {
-      b.disabled = true;
-      b.classList.remove('correct', 'wrong');
-    });
+  // Zablokuj wszystkie i wyczyść klasy
+  const all = [...$('#qb_answers').querySelectorAll('.choice')];
+  all.forEach(b => {
+    b.disabled = true;
+    b.classList.remove('correct', 'wrong');
+  });
 
-    // Podświetl kliknięty
-    if(ok){ STATE.ok++; btn.classList.add('correct'); }
-    else  { STATE.bad++; btn.classList.add('wrong'); }
+  // Podświetl kliknięty
+  if(ok){ STATE.ok++; btn.classList.add('correct'); }
+  else  { STATE.bad++; btn.classList.add('wrong'); }
 
-    // Podświetl WYŁĄCZNIE jedną poprawną (ścisła równość)
-    const correctBtn = all.find(b => isChoiceEqual(q, b.textContent));
-    if (correctBtn) correctBtn.classList.add('correct');
+  // Podświetl WYŁĄCZNIE jedną poprawną (ścisła równość)
+  const correctBtn = all.find(b => isChoiceEqual(q, b.textContent));
+  if (correctBtn) correctBtn.classList.add('correct');
 
-    // feedback
-    $('#qb_feedback').innerHTML = ok
-      ? `<span style="color:var(--green);font-weight:600;">✔ Dobrze</span> <span class="muted">(${q._dt.toFixed(2)} s)</span>`
-      : `<span style="color:var(--red);font-weight:600;">✖ Źle</span> <span class="muted">(${q._dt.toFixed(2)} s)</span>`;
+  // feedback
+  $('#qb_feedback').innerHTML = ok
+    ? `<span style="color:var(--green);font-weight:600;">✔ Dobrze</span> <span class="muted">(${q._dt.toFixed(2)} s)</span>`
+    : `<span style="color:var(--red);font-weight:600;">✖ Źle</span> <span class="muted">(${q._dt.toFixed(2)} s)</span>`;
 
-    renderProgress();
+  renderProgress();
 
-    // auto-next przy poprawnej po krótkim opóźnieniu
-    if(ok){
-      setTimeout(()=>{
-        if(STATE.idx < STATE.questions.length-1) next();
-        else finish();
-      }, 400);
-    }
-  }
-
+  // 🔁 Auto-przejście dalej zarówno po DOBREJ, jak i po ZŁEJ odpowiedzi
+  const delay = ok ? 400 : 650; // daj chwilę, by zobaczyć poprawną
+  if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
+  STATE.autoNextT = setTimeout(()=>{
+    STATE.autoNextT = null;
+    if(STATE.idx < STATE.questions.length-1) next();
+    else finish();
+  }, delay);
+}
   function next(){
+    if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
     if(STATE.idx < STATE.questions.length-1){
       STATE.idx++;
       renderQuestion();
     } else finish();
   }
   function prev(){
+    if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
     if(STATE.idx>0){
       STATE.idx--;
       renderQuestion();
@@ -419,6 +422,7 @@ export function mount(root){
   }
 
   function start(){
+    if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
     const pool = buildPool($('#qb_region').value);
     const dir  = $('#qb_dir').value;
     const opts = parseInt($('#qb_opts').value||'4',10);
@@ -437,6 +441,7 @@ export function mount(root){
   }
 
   function finish(){
+    if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
     $('#setupCard').style.display='none';
     $('#quizCard').style.display='none';
     $('#resultCard').style.display='block';
@@ -474,28 +479,30 @@ export function mount(root){
   };
 
   // Skróty klawiaturowe: 1–6 wybierają opcję, Enter przechodzi dalej po sprawdzeniu
-  function onKeydown(e){
-    const quizVisible = $('#quizCard').style.display !== 'none';
-    if(!quizVisible) return;
+function onKeydown(e){
+  const quizVisible = $('#quizCard').style.display !== 'none';
+  if(!quizVisible) return;
 
-    if(e.key === 'Enter'){
-      const q = STATE.questions[STATE.idx];
-      if(q?._answered){
-        e.preventDefault(); e.stopPropagation();
-        next();
-      }
-      return;
+  if(e.key === 'Enter'){
+    const q = STATE.questions[STATE.idx];
+    if(q?._answered){
+      e.preventDefault(); e.stopPropagation();
+      // jeśli był zaplanowany auto-next, anuluj i idź od razu
+      if (STATE.autoNextT) { clearTimeout(STATE.autoNextT); STATE.autoNextT = null; }
+      next();
     }
+    return;
+  }
 
-    if(/^[1-6]$/.test(e.key)){
-      const idx = parseInt(e.key,10)-1;
-      const btn = STATE.answerButtons[idx];
-      if(btn && !btn.disabled){
-        e.preventDefault(); e.stopPropagation();
-        btn.click();
-      }
+  if(/^[1-6]$/.test(e.key)){
+    const idx = parseInt(e.key,10)-1;
+    const btn = STATE.answerButtons[idx];
+    if(btn && !btn.disabled){
+      e.preventDefault(); e.stopPropagation();
+      btn.click();
     }
   }
+}
   window.addEventListener('keydown', onKeydown);
   root.__onKeydownBasic = onKeydown;
 }
