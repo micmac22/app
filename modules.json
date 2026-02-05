@@ -10,7 +10,7 @@
     },
   "extreme": {
     "name": "Tryb ekstremalny",
-    "entry": "modules/quiz-extreme/index.js"
+    "entry": "modules/quiz-extreme/index.js",
     "hidden": true
   },
     "chaos": {
