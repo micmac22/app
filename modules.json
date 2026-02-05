@@ -8,14 +8,14 @@
       "name": "Rozszerzanie skrótów / Podaj skrót",
       "entry": "modules/quiz-expand/index.js"
     },
-  "extreme": {
-    "name": "Tryb ekstremalny",
-    "entry": "modules/quiz-extreme/index.js"
-    "hidden": true,
-  },
+    "extreme": {
+      "name": "Tryb ekstremalny",
+      "entry": "modules/quiz-extreme/index.js"
+    },
     "chaos": {
       "name": "Chaos danych",
-      "entry": "modules/quiz-chaos/index.js"
+      "entry": "modules/quiz-chaos/index.js",
+      "hidden": true
     },
     "clusters": {
       "name": "Klastrowanie skrótów",
