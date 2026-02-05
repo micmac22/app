@@ -20,7 +20,8 @@
     },
       "saper": {
       "name": "Saper",
-      "entry": "modules/saper/index.js"
+      "entry": "modules/saper/index.js",
+        "hidden":true
     
     },
     "clusters": {
