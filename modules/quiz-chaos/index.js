@@ -8,6 +8,46 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root) {
+  // ---- STAŁE CZASOWE ----
+  const BONUS_GOOD = 1.4;   // +1,4 s za dobrą odpowiedź
+  const PENALTY_BAD = -0.6; // −0,6 s za złą odpowiedź
+
+  // ---- JEDNORAZOWE WSTRZYKNIĘCIE STYLI (animacje, pasek wyniku) ----
+  if (!document.getElementById("quizChaosStyles")) {
+    const style = document.createElement("style");
+    style.id = "quizChaosStyles";
+    style.textContent = `
+      /* Pasek wyniku (poziomy, krótkie "błyśnięcie") */
+      .result-bar {
+        height: 6px;
+        width: 0%;
+        background: transparent;
+        border-radius: 4px;
+        transition: width 220ms ease, background-color 120ms ease, opacity 200ms ease;
+        opacity: 0.95;
+      }
+      .result-bar.success { background: var(--green, #16a34a); width: 100%; }
+      .result-bar.error   { background: var(--red,   #dc2626); width: 100%; }
+      .result-bar.fadeout { opacity: 0.25; }
+
+      /* Animacja "shake" na błąd */
+      @keyframes ch-shake {
+        0%   { transform: translateX(0); }
+        20%  { transform: translateX(-6px); }
+        40%  { transform: translateX(6px); }
+        60%  { transform: translateX(-4px); }
+        80%  { transform: translateX(4px); }
+        100% { transform: translateX(0); }
+      }
+      .shake { animation: ch-shake 300ms ease; }
+
+      /* Badge/etykiety pomocnicze */
+      .stats-badge { background: var(--surface-2, #f3f4f6); padding: 4px 8px; border-radius: 10px; font-weight: 600; }
+      .streak-line { margin-top: 6px; font-size: 13px; }
+    `;
+    document.head.appendChild(style);
+  }
+
   root.innerHTML = `
     <section class="card" id="ch_setup">
       <h2>🌀 Chaos danych</h2>
@@ -39,7 +79,7 @@ export function mount(root) {
       </div>
 
       <p class="muted" style="margin-top:8px;">
-        Zasady: dobra odpowiedź <strong>+1,2s s</strong>, zła <strong>−0,75 s</strong>. ENTER = zatwierdź i przejdź dalej.
+        Zasady: dobra odpowiedź <strong>+1,4 s</strong>, zła <strong>−0,6 s</strong>. ENTER = zatwierdź i przejdź dalej.
       </p>
     </section>
 
@@ -47,6 +87,14 @@ export function mount(root) {
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div class="stats-badge">✅ <span id="ch_score">0</span></div>
         <div id="timer" aria-live="polite">10.0</div>
+      </div>
+
+      <!-- Pasek zależny od wyniku -->
+      <div id="ch_result_bar" class="result-bar" aria-hidden="true"></div>
+
+      <!-- Linia informacji o serii -->
+      <div class="streak-line muted">
+        🔥 Seria: <span id="ch_streak">0</span> • Rekord: <span id="ch_beststreak">0</span>
       </div>
 
       <div style="margin: 16px 0;">
@@ -66,7 +114,7 @@ export function mount(root) {
         Wynik: <span id="ch_final">0</span>
       </div>
       <div class="muted" style="margin-top:6px;">
-        Startowy: <span id="ch_starttime">10</span>s • Kierunek: <span id="ch_finaldir">mixed</span> • Pula: <span id="ch_poolsize">0</span>
+        Startowy: <span id="ch_starttime">10</span>s • Kierunek: <span id="ch_finaldir">mixed</span> • Pula: <span id="ch_poolsize">0</span> • Najdłuższa seria: <span id="ch_best_final">0</span>
       </div>
       <div style="margin-top:12px;">
         <button id="ch_again" class="success">🔄 Jeszcze raz</button>
@@ -84,6 +132,9 @@ export function mount(root) {
     score: 0,
     timerId: null,
     current: null,
+    streak: 0,
+    bestStreak: 0,
+    barTimeoutId: null,
   };
 
   function uniqueByCode(arr) {
@@ -149,6 +200,11 @@ export function mount(root) {
       clearInterval(STATE.timerId);
       STATE.timerId = null;
     }
+    // Wyczyść ewentualny timeout paska wyniku
+    if (STATE.barTimeoutId) {
+      clearTimeout(STATE.barTimeoutId);
+      STATE.barTimeoutId = null;
+    }
 
     $("#ch_game").style.display = "none";
     $("#ch_end").style.display = "block";
@@ -157,6 +213,7 @@ export function mount(root) {
     $("#ch_starttime").textContent = STATE.startTime;
     $("#ch_finaldir").textContent = STATE.dir;
     $("#ch_poolsize").textContent = STATE.pool.length;
+    $("#ch_best_final").textContent = STATE.bestStreak;
   }
 
   function applyDeltaTime(delta) {
@@ -171,6 +228,47 @@ export function mount(root) {
     return true;
   }
 
+  // --- Efekty wizualne: pasek i shake ---
+  function flashResultBar(isSuccess) {
+    const bar = $("#ch_result_bar");
+    // Usuń poprzednie klasy i timery
+    bar.classList.remove("success", "error", "fadeout");
+    if (STATE.barTimeoutId) {
+      clearTimeout(STATE.barTimeoutId);
+      STATE.barTimeoutId = null;
+    }
+    // Włącz kolor i 100% szerokości
+    bar.classList.add(isSuccess ? "success" : "error");
+    // Delikatne wygaszenie i zwinięcie po krótkim czasie
+    STATE.barTimeoutId = setTimeout(() => {
+      bar.classList.add("fadeout");
+      // Po wygaszeniu wycofaj do stanu 0%
+      setTimeout(() => {
+        bar.classList.remove("success", "error", "fadeout");
+      }, 220);
+    }, 260);
+  }
+
+  function shakeOnError() {
+    const input = $("#ch_input");
+    const feed = $("#ch_feedback");
+    // Dodaj klasę shake, a po animacji usuń
+    [input, feed].forEach((el) => {
+      el.classList.remove("shake"); // restart animacji
+      // Siłowe wyzwolenie reflow, by animacja mogła zadziałać ponownie
+      // eslint-disable-next-line no-unused-expressions
+      el.offsetHeight;
+      el.classList.add("shake");
+      const remove = () => el.classList.remove("shake");
+      el.addEventListener("animationend", remove, { once: true });
+    });
+  }
+
+  function updateStreakUI() {
+    $("#ch_streak").textContent = STATE.streak;
+    $("#ch_beststreak").textContent = STATE.bestStreak;
+  }
+
   function checkAnswer() {
     const val = $("#ch_input").value.trim();
     if (!val) return;
@@ -181,16 +279,34 @@ export function mount(root) {
 
     if (ok) {
       STATE.score += 1;
+      STATE.streak += 1;
+      if (STATE.streak > STATE.bestStreak) STATE.bestStreak = STATE.streak;
+
       $("#ch_score").textContent = STATE.score;
-      $("#ch_feedback").innerHTML = `<span style="color: var(--green); font-weight:600;">✔ +1,2 s</span>`;
-      if (!applyDeltaTime(+1.2)) return;
+      updateStreakUI();
+
+      $("#ch_feedback").innerHTML =
+        `<span style="color: var(--green); font-weight:600;">✔ +1,4 s</span>`;
+      flashResultBar(true);
+
+      if (!applyDeltaTime(+BONUS_GOOD)) return;
     } else {
+      STATE.streak = 0;
+      updateStreakUI();
+
       const corr =
         q.expect === "code"
           ? `<code>${q.correct}</code>`
           : `<strong>${q.correct}</strong>`;
-      $("#ch_feedback").innerHTML = `<span style="color: var(--red); font-weight:600;">✖ −0,75 s</span> &nbsp; <span class="muted">(poprawna: ${corr})</span>`;
-      if (!applyDeltaTime(-0.75)) return;
+
+      $("#ch_feedback").innerHTML =
+        `<span style="color: var(--red); font-weight:600;">✖ −0,6 s</span>
+         <span class="muted" style="margin-left:8px;">(poprawna: ${corr})</span>`;
+
+      flashResultBar(false);
+      shakeOnError();
+
+      if (!applyDeltaTime(PENALTY_BAD)) return;
     }
 
     // ENTER = zatwierdź i natychmiast następne pytanie
@@ -215,6 +331,9 @@ export function mount(root) {
     STATE.startTime = Math.max(3, Math.min(300, parseFloat($("#ch_time").value) || 10));
     STATE.time = STATE.startTime;
     STATE.score = 0;
+    STATE.streak = 0;
+    STATE.bestStreak = 0;
+    updateStreakUI();
 
     if (!STATE.pool.length) {
       alert("Brak danych w wybranym regionie.");
@@ -250,6 +369,10 @@ export function mount(root) {
       clearInterval(STATE.timerId);
       STATE.timerId = null;
     }
+    if (STATE.barTimeoutId) {
+      clearTimeout(STATE.barTimeoutId);
+      STATE.barTimeoutId = null;
+    }
     $("#ch_setup").style.display = "block";
     $("#ch_game").style.display = "none";
     $("#ch_end").style.display = "none";
@@ -264,4 +387,3 @@ export function unmount(root) {
 
 // Dodatkowo default export – będzie też działać, jeśli kiedyś zmienisz loader na mod.default
 export default { mount, unmount };
-``
