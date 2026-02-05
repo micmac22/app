@@ -2,8 +2,6 @@
 import {
   DEFAULT_REGION1,
   DEFAULT_REGION2,
-  isNameMatch,
-  isCodeMatch,
   loadCustomRegionData,
 } from "../../shared/shared-logic.js";
 
@@ -11,16 +9,20 @@ export function mount(root) {
   // ---- STAŁE ----
   const BONUS_GOOD = 1.4;    // +1,4 s za dobrą odpowiedź
   const PENALTY_BAD = -0.6;  // −0,6 s za złą odpowiedź
-  const BALANCE_STEP = 6;    // ile % przesuwa się wskaźnik statycznego paska po każdej odpowiedzi
-  const BALANCE_MIN = -45;   // ograniczenie lewo/prawo, by marker nie „wyjeżdżał” za tło
-  const BALANCE_MAX = 45;
 
-  // ---- JEDNORAZOWE WSTRZYKNIĘCIE STYLI ----
+  // Statyczny pasek równowagi: parametry
+  const BALANCE_STEP = 2;              // przesunięcie markera [%] po każdej odpowiedzi
+  const BALANCE_DECAY_PER_TICK = 0.2;  // powrót do środka [%] co tick (100 ms) ~2%/s
+  const BALANCE_MIN = -40;             // lewe ograniczenie
+  const BALANCE_MAX = 40;              // prawe ograniczenie
+  const EDGE_DAMPING_MIN = 0.35;       // minimalne tłumienie przy krawędziach (35%)
+
+  // ---- STYLE (animacje, paski) – wstrzyknięcie jednokrotne ----
   if (!document.getElementById("quizChaosStyles")) {
     const style = document.createElement("style");
     style.id = "quizChaosStyles";
     style.textContent = `
-      /* Pasek błyskowy po odpowiedzi (poziomy, krótkie "błyśnięcie") */
+      /* Pasek błyskowy po odpowiedzi (szybki flash) */
       .result-bar {
         height: 6px;
         width: 0%;
@@ -34,7 +36,7 @@ export function mount(root) {
       .result-bar.error   { background: var(--red,   #dc2626); width: 100%; }
       .result-bar.fadeout { opacity: 0.25; }
 
-      /* Statyczny pasek równowagi (lewo czerwony, prawo zielony) */
+      /* Statyczny pasek równowagi: lewo czerwone, prawo zielone, marker pośrodku */
       .balance-wrap {
         position: relative;
         height: 12px;
@@ -62,7 +64,7 @@ export function mount(root) {
         transition: left 220ms ease;
       }
 
-      /* Animacja "shake" na błąd – przykład dla całej sekcji gry i wybranych elementów */
+      /* Shake na błąd – sekcja gry + input + feedback */
       @keyframes ch-shake {
         0%   { transform: translateX(0); }
         20%  { transform: translateX(-6px); }
@@ -73,13 +75,14 @@ export function mount(root) {
       }
       .shake { animation: ch-shake 300ms ease; }
 
-      /* Drobne style pomocnicze */
+      /* Drobne */
       .stats-badge { background: var(--surface-2, #f3f4f6); padding: 4px 8px; border-radius: 10px; font-weight: 600; }
       .streak-line { margin-top: 6px; font-size: 13px; }
     `;
     document.head.appendChild(style);
   }
 
+  // ---- DOM ----
   root.innerHTML = `
     <section class="card" id="ch_setup">
       <h2>🌀 Chaos danych</h2>
@@ -121,7 +124,7 @@ export function mount(root) {
         <div id="timer" aria-live="polite">10.0</div>
       </div>
 
-      <!-- Pasek błyskowy (na 1 pytanie) -->
+      <!-- Pasek błyskowy (flash) -->
       <div id="ch_result_bar" class="result-bar" aria-hidden="true"></div>
 
       <!-- Statyczny pasek równowagi -->
@@ -129,7 +132,7 @@ export function mount(root) {
         <div id="ch_balance_marker" class="balance-marker" role="presentation" aria-label="Wskaźnik skuteczności"></div>
       </div>
 
-      <!-- Linia informacji o serii -->
+      <!-- Seria -->
       <div class="streak-line muted">
         🔥 Seria: <span id="ch_streak">0</span> • Rekord: <span id="ch_beststreak">0</span>
       </div>
@@ -161,6 +164,7 @@ export function mount(root) {
 
   const $ = (sel) => root.querySelector(sel);
 
+  // ---- STAN ----
   const STATE = {
     pool: [],
     dir: "mixed",
@@ -172,9 +176,56 @@ export function mount(root) {
     streak: 0,
     bestStreak: 0,
     barTimeoutId: null,
-    balance: 0, // pozycja markera w %
+    balance: 0, // pozycja markera [%]
   };
 
+  // ---- NORMALIZACJA I DOPASOWANIA ----
+
+  // Słowa-klucze traktowane jako rozwinięcia skrótów (możesz dopisać kolejne)
+  const KEY_TERMS = new Set(["pkp", "trakcja"]);
+
+  const stripDiacritics = (s) =>
+    String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Kody: wielkość bez znaczenia, ignorujemy znaki niealfanumeryczne
+  const normalizeCode = (s) =>
+    stripDiacritics(s).toUpperCase().replace(/[^A-Z0-9]/g, "").trim();
+
+  // Nazwy: bez polskich znaków, małe litery, zredukowane spacje
+  const normalizeName = (s) =>
+    stripDiacritics(s).toLowerCase().replace(/\s+/g, " ").trim();
+
+  // 1) KOD: pełna zgodność po normalizacji (bez częściowych dopasowań)
+  function strictCodeMatch(input, correct) {
+    return normalizeCode(input) === normalizeCode(correct);
+  }
+
+  // 2) NAZWA (rozwinięcie):
+  //    - akceptuj dokładną zgodność po normalizacji
+  //    - ALBO: jeśli wpis zawiera słowo-klucz (np. pkp/trakcja) i to samo słowo-klucz jest w poprawnej nazwie
+  //    - dodatkowo: jeśli wpis to pojedynczy token i NIE jest słowem-kluczem → odrzuć (np. "lublin" nie przejdzie)
+  function flexibleNameMatch(input, correct) {
+    const inN = normalizeName(input);
+    const corN = normalizeName(correct);
+
+    if (!inN) return false;
+    if (inN === corN) return true;
+
+    const inTokens = inN.split(/[^a-z0-9]+/).filter(Boolean);
+    const corTokensSet = new Set(corN.split(/[^a-z0-9]+/).filter(Boolean));
+
+    if (inTokens.length === 1 && !KEY_TERMS.has(inTokens[0])) {
+      return false; // sama miejscowość/pojedynczy token ≠ zaliczenie
+    }
+
+    if (inTokens.some((t) => KEY_TERMS.has(t) && corTokensSet.has(t))) {
+      return true; // zawiera wspólny termin-klucz
+    }
+
+    return false;
+  }
+
+  // ---- DANE I LOSOWANIE ----
   function uniqueByCode(arr) {
     const map = new Map();
     arr.forEach((x) => {
@@ -217,6 +268,7 @@ export function mount(root) {
     }
   }
 
+  // ---- UI ----
   function setTimerVisual(t) {
     const el = $("#timer");
     el.textContent = Math.max(0, t).toFixed(1);
@@ -264,14 +316,11 @@ export function mount(root) {
     return true;
   }
 
-  // --- Paski i animacje ---
+  // ---- Efekty wizualne (flash, shake, balance) ----
   function flashResultBar(isSuccess) {
     const bar = $("#ch_result_bar");
-    // Reset do bazowej klasy, by nie zostawały stare stany
     bar.className = "result-bar";
-    // Reflow, by odświeżyć animację
-    void bar.offsetWidth;
-    // Ustaw wynik i dodaj wygaszenie po chwili
+    void bar.offsetWidth; // restart animacji
     bar.classList.add(isSuccess ? "success" : "error");
 
     if (STATE.barTimeoutId) {
@@ -286,7 +335,7 @@ export function mount(root) {
     }, 260);
   }
 
-  function shakeElementsOnError() {
+  function shakeOnError() {
     const els = [$("#ch_game"), $("#ch_input"), $("#ch_feedback")];
     els.forEach((el) => {
       if (!el) return;
@@ -297,14 +346,29 @@ export function mount(root) {
     });
   }
 
-  function clamp(val, min, max) {
-    return Math.max(min, Math.min(max, val));
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
   }
 
   function updateBalance(delta = 0) {
-    STATE.balance = clamp(STATE.balance + delta, BALANCE_MIN, BALANCE_MAX);
-    const marker = $("#ch_balance_marker");
-    marker?.style.setProperty("--offset", `${STATE.balance}%`);
+    // Tłumienie przy krawędziach: im bliżej skrajów, tym mniejszy efektywny krok
+    const edgeRatio = Math.min(1, Math.abs(STATE.balance) / BALANCE_MAX);
+    const damping = EDGE_DAMPING_MIN + (1 - EDGE_DAMPING_MIN) * (1 - edgeRatio); // [0.35..1]
+    const applied = delta * damping;
+
+    STATE.balance = clamp(STATE.balance + applied, BALANCE_MIN, BALANCE_MAX);
+    $("#ch_balance_marker")?.style.setProperty("--offset", `${STATE.balance}%`);
+  }
+
+  function decayBalanceTowardsCenter() {
+    if (STATE.balance === 0) return;
+    const sign = STATE.balance > 0 ? -1 : 1;
+    if (Math.abs(STATE.balance) <= BALANCE_DECAY_PER_TICK) {
+      STATE.balance = 0;
+    } else {
+      STATE.balance += sign * BALANCE_DECAY_PER_TICK;
+    }
+    $("#ch_balance_marker")?.style.setProperty("--offset", `${STATE.balance}%`);
   }
 
   function updateStreakUI() {
@@ -323,13 +387,15 @@ export function mount(root) {
        <span class="muted" style="margin-left:8px;">(poprawna: ${correctHtml})</span>`;
   }
 
+  // ---- LOGIKA ODPOWIEDZI ----
   function checkAnswer() {
     const val = $("#ch_input").value.trim();
     if (!val) return;
 
     const q = STATE.current;
-    const ok =
-      q.expect === "code" ? isCodeMatch(val, q.correct) : isNameMatch(val, q.correct);
+    const ok = q.expect === "code"
+      ? strictCodeMatch(val, q.correct)     // skrót: pełna zgodność (case-insensitive, bez symboli)
+      : flexibleNameMatch(val, q.correct);  // nazwa: zasady z PKP/Trakcja itd.
 
     if (ok) {
       STATE.score += 1;
@@ -354,16 +420,17 @@ export function mount(root) {
 
       showBadFeedback(corr);
       flashResultBar(false);
-      shakeElementsOnError();
+      shakeOnError();
       updateBalance(-BALANCE_STEP);
 
       if (!applyDeltaTime(PENALTY_BAD)) return;
     }
 
-    // ENTER = zatwierdź i natychmiast następne pytanie
+    // Od razu następne pytanie
     renderQuestion();
   }
 
+  // ---- ZEGAR ----
   function tick() {
     STATE.time -= 0.1;
     if (STATE.time <= 0) {
@@ -373,8 +440,12 @@ export function mount(root) {
       return;
     }
     setTimerVisual(STATE.time);
+
+    // delikatny, ciągły powrót markera do środka
+    decayBalanceTowardsCenter();
   }
 
+  // ---- START/RESET ----
   function startGame() {
     const regionSel = $("#ch_region").value;
     STATE.pool = buildPool(regionSel);
@@ -386,7 +457,7 @@ export function mount(root) {
     STATE.bestStreak = 0;
     STATE.balance = 0;
     updateStreakUI();
-    updateBalance(0); // zresetuj wskaźnik do środka
+    $("#ch_balance_marker")?.style.setProperty("--offset", `0%`);
 
     if (!STATE.pool.length) {
       alert("Brak danych w wybranym regionie.");
@@ -406,7 +477,7 @@ export function mount(root) {
     STATE.timerId = setInterval(tick, 100);
   }
 
-  // === Zdarzenia ===
+  // ---- ZDARZENIA ----
   $("#ch_start").onclick = startGame;
 
   $("#ch_input").addEventListener("keydown", (e) => {
@@ -434,9 +505,8 @@ export function mount(root) {
 }
 
 export function unmount(root) {
-  // Zatrzymaj interwały i wyczyść DOM
+  // Zatrzymaj interwały i wyczyść DOM (timery były w STATE w mount; tu czyścimy DOM)
   root.innerHTML = "";
 }
 
-// Dodatkowo default export – będzie też działać, jeśli kiedyś zmienisz loader na mod.default
 export default { mount, unmount };
