@@ -10,8 +10,8 @@
     },
   "extreme": {
     "name": "Tryb ekstremalny",
-    "entry": "modules/quiz-extreme/index.js",
-    "hidden": true
+    "entry": "modules/quiz-extreme/index.js"
+    "hidden": true,
   },
     "chaos": {
       "name": "Chaos danych",
