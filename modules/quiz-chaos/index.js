@@ -8,16 +8,19 @@ import {
 } from "../../shared/shared-logic.js";
 
 export function mount(root) {
-  // ---- STAŁE CZASOWE ----
-  const BONUS_GOOD = 1.4;   // +1,4 s za dobrą odpowiedź
-  const PENALTY_BAD = -0.6; // −0,6 s za złą odpowiedź
+  // ---- STAŁE ----
+  const BONUS_GOOD = 1.4;    // +1,4 s za dobrą odpowiedź
+  const PENALTY_BAD = -0.6;  // −0,6 s za złą odpowiedź
+  const BALANCE_STEP = 6;    // ile % przesuwa się wskaźnik statycznego paska po każdej odpowiedzi
+  const BALANCE_MIN = -45;   // ograniczenie lewo/prawo, by marker nie „wyjeżdżał” za tło
+  const BALANCE_MAX = 45;
 
-  // ---- JEDNORAZOWE WSTRZYKNIĘCIE STYLI (animacje, pasek wyniku) ----
+  // ---- JEDNORAZOWE WSTRZYKNIĘCIE STYLI ----
   if (!document.getElementById("quizChaosStyles")) {
     const style = document.createElement("style");
     style.id = "quizChaosStyles";
     style.textContent = `
-      /* Pasek wyniku (poziomy, krótkie "błyśnięcie") */
+      /* Pasek błyskowy po odpowiedzi (poziomy, krótkie "błyśnięcie") */
       .result-bar {
         height: 6px;
         width: 0%;
@@ -25,12 +28,41 @@ export function mount(root) {
         border-radius: 4px;
         transition: width 220ms ease, background-color 120ms ease, opacity 200ms ease;
         opacity: 0.95;
+        margin-top: 8px;
       }
       .result-bar.success { background: var(--green, #16a34a); width: 100%; }
       .result-bar.error   { background: var(--red,   #dc2626); width: 100%; }
       .result-bar.fadeout { opacity: 0.25; }
 
-      /* Animacja "shake" na błąd */
+      /* Statyczny pasek równowagi (lewo czerwony, prawo zielony) */
+      .balance-wrap {
+        position: relative;
+        height: 12px;
+        border-radius: 6px;
+        margin-top: 8px;
+        background: linear-gradient(
+          90deg,
+          var(--red, #dc2626) 0%,
+          var(--red, #dc2626) 50%,
+          var(--green, #16a34a) 50%,
+          var(--green, #16a34a) 100%
+        );
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06), inset 0 2px 6px rgba(0,0,0,0.08);
+      }
+      .balance-marker {
+        position: absolute;
+        top: 50%;
+        left: calc(50% + var(--offset, 0%));
+        transform: translate(-50%, -50%);
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--surface-1, #fff);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        transition: left 220ms ease;
+      }
+
+      /* Animacja "shake" na błąd – przykład dla całej sekcji gry i wybranych elementów */
       @keyframes ch-shake {
         0%   { transform: translateX(0); }
         20%  { transform: translateX(-6px); }
@@ -41,7 +73,7 @@ export function mount(root) {
       }
       .shake { animation: ch-shake 300ms ease; }
 
-      /* Badge/etykiety pomocnicze */
+      /* Drobne style pomocnicze */
       .stats-badge { background: var(--surface-2, #f3f4f6); padding: 4px 8px; border-radius: 10px; font-weight: 600; }
       .streak-line { margin-top: 6px; font-size: 13px; }
     `;
@@ -89,8 +121,13 @@ export function mount(root) {
         <div id="timer" aria-live="polite">10.0</div>
       </div>
 
-      <!-- Pasek zależny od wyniku -->
+      <!-- Pasek błyskowy (na 1 pytanie) -->
       <div id="ch_result_bar" class="result-bar" aria-hidden="true"></div>
+
+      <!-- Statyczny pasek równowagi -->
+      <div id="ch_balance_wrap" class="balance-wrap" aria-hidden="true">
+        <div id="ch_balance_marker" class="balance-marker" role="presentation" aria-label="Wskaźnik skuteczności"></div>
+      </div>
 
       <!-- Linia informacji o serii -->
       <div class="streak-line muted">
@@ -135,6 +172,7 @@ export function mount(root) {
     streak: 0,
     bestStreak: 0,
     barTimeoutId: null,
+    balance: 0, // pozycja markera w %
   };
 
   function uniqueByCode(arr) {
@@ -192,7 +230,6 @@ export function mount(root) {
     $("#ch_stem").innerHTML = STATE.current.stem;
     $("#ch_input").value = "";
     $("#ch_input").focus();
-    // Feedback zostawiamy widoczny, żeby gracz widział wynik poprzedniej odpowiedzi
   }
 
   function endGame() {
@@ -200,7 +237,6 @@ export function mount(root) {
       clearInterval(STATE.timerId);
       STATE.timerId = null;
     }
-    // Wyczyść ewentualny timeout paska wyniku
     if (STATE.barTimeoutId) {
       clearTimeout(STATE.barTimeoutId);
       STATE.barTimeoutId = null;
@@ -228,45 +264,63 @@ export function mount(root) {
     return true;
   }
 
-  // --- Efekty wizualne: pasek i shake ---
+  // --- Paski i animacje ---
   function flashResultBar(isSuccess) {
     const bar = $("#ch_result_bar");
-    // Usuń poprzednie klasy i timery
-    bar.classList.remove("success", "error", "fadeout");
+    // Reset do bazowej klasy, by nie zostawały stare stany
+    bar.className = "result-bar";
+    // Reflow, by odświeżyć animację
+    void bar.offsetWidth;
+    // Ustaw wynik i dodaj wygaszenie po chwili
+    bar.classList.add(isSuccess ? "success" : "error");
+
     if (STATE.barTimeoutId) {
       clearTimeout(STATE.barTimeoutId);
       STATE.barTimeoutId = null;
     }
-    // Włącz kolor i 100% szerokości
-    bar.classList.add(isSuccess ? "success" : "error");
-    // Delikatne wygaszenie i zwinięcie po krótkim czasie
     STATE.barTimeoutId = setTimeout(() => {
       bar.classList.add("fadeout");
-      // Po wygaszeniu wycofaj do stanu 0%
       setTimeout(() => {
-        bar.classList.remove("success", "error", "fadeout");
+        bar.className = "result-bar";
       }, 220);
     }, 260);
   }
 
-  function shakeOnError() {
-    const input = $("#ch_input");
-    const feed = $("#ch_feedback");
-    // Dodaj klasę shake, a po animacji usuń
-    [input, feed].forEach((el) => {
-      el.classList.remove("shake"); // restart animacji
-      // Siłowe wyzwolenie reflow, by animacja mogła zadziałać ponownie
-      // eslint-disable-next-line no-unused-expressions
-      el.offsetHeight;
+  function shakeElementsOnError() {
+    const els = [$("#ch_game"), $("#ch_input"), $("#ch_feedback")];
+    els.forEach((el) => {
+      if (!el) return;
+      el.classList.remove("shake");
+      void el.offsetWidth; // restart animacji
       el.classList.add("shake");
-      const remove = () => el.classList.remove("shake");
-      el.addEventListener("animationend", remove, { once: true });
+      el.addEventListener("animationend", () => el.classList.remove("shake"), { once: true });
     });
+  }
+
+  function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+  }
+
+  function updateBalance(delta = 0) {
+    STATE.balance = clamp(STATE.balance + delta, BALANCE_MIN, BALANCE_MAX);
+    const marker = $("#ch_balance_marker");
+    marker?.style.setProperty("--offset", `${STATE.balance}%`);
   }
 
   function updateStreakUI() {
     $("#ch_streak").textContent = STATE.streak;
     $("#ch_beststreak").textContent = STATE.bestStreak;
+  }
+
+  function showGoodFeedback() {
+    $("#ch_feedback").innerHTML =
+      `<span style="color: var(--green, #16a34a); font-weight:600;">✔ +1,4 s</span>`;
+  }
+
+  function showBadFeedback(correctHtml) {
+    $("#ch_feedback").innerHTML =
+      `<span style="color: var(--red, #dc2626); font-weight:600;">✖ −0,6 s</span>
+       <span class="muted" style="margin-left:8px;">(poprawna: ${correctHtml})</span>`;
   }
 
   function checkAnswer() {
@@ -284,12 +338,11 @@ export function mount(root) {
 
       $("#ch_score").textContent = STATE.score;
       updateStreakUI();
-
-      $("#ch_feedback").innerHTML =
-        `<span style="color: var(--green); font-weight:600;">✔ +1,4 s</span>`;
+      showGoodFeedback();
       flashResultBar(true);
+      updateBalance(+BALANCE_STEP);
 
-      if (!applyDeltaTime(+BONUS_GOOD)) return;
+      if (!applyDeltaTime(BONUS_GOOD)) return;
     } else {
       STATE.streak = 0;
       updateStreakUI();
@@ -299,12 +352,10 @@ export function mount(root) {
           ? `<code>${q.correct}</code>`
           : `<strong>${q.correct}</strong>`;
 
-      $("#ch_feedback").innerHTML =
-        `<span style="color: var(--red); font-weight:600;">✖ −0,6 s</span>
-         <span class="muted" style="margin-left:8px;">(poprawna: ${corr})</span>`;
-
+      showBadFeedback(corr);
       flashResultBar(false);
-      shakeOnError();
+      shakeElementsOnError();
+      updateBalance(-BALANCE_STEP);
 
       if (!applyDeltaTime(PENALTY_BAD)) return;
     }
@@ -333,7 +384,9 @@ export function mount(root) {
     STATE.score = 0;
     STATE.streak = 0;
     STATE.bestStreak = 0;
+    STATE.balance = 0;
     updateStreakUI();
+    updateBalance(0); // zresetuj wskaźnik do środka
 
     if (!STATE.pool.length) {
       alert("Brak danych w wybranym regionie.");
