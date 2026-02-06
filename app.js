@@ -151,6 +151,24 @@ async function init() {
 }
 
 init();
-
+// === Sekwencja "Konami" => odpal saper ===
+(function setupKonami() {
+  const pattern = ["arrowup","arrowup","arrowdown","arrowdown","arrowleft","arrowright","arrowleft","arrowright","b","a"];
+  let idx = 0;
+  window.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === pattern[idx]) {
+      idx++;
+      if (idx === pattern.length) {
+        idx = 0;
+        mountModule("saper", null);
+      }
+    } else {
+      // jeśli klawisz jest początkiem sekwencji – zacznij od 1
+      idx = (k === pattern[0]) ? 1 : 0;
+    }
+  });
+})();
 // (Opcjonalnie) Eksportuj mountModule do debugowania z konsoli
 // window.mountModule = mountModule;
+
