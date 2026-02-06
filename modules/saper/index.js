@@ -233,8 +233,8 @@ export function mount(root) {
     for (let y=0; y<STATE.rows; y++) {
       for (let x=0; x<STATE.cols; x++) {
         const cell = document.createElement("div");
-        cell.dataset.x = x;
-        cell.dataset.y = y;
+        cell.dataset.x = x.toString();
+        cell.dataset.y = y.toString();
         cell.className = "sap_cell";
         elBoard.appendChild(cell);
       }
@@ -248,7 +248,8 @@ export function mount(root) {
 
     for (let y=0; y<STATE.rows; y++) {
       for (let x=0; x<STATE.cols; x++) {
-        const cell = elBoard.children[y*STATE.cols + x];
+        const idx = y * STATE.cols + x;
+        const cell = elBoard.children[idx];
         if (!cell) continue;
 
         const r = STATE.revealed[y]?.[x] ?? false;
@@ -280,7 +281,10 @@ export function mount(root) {
       }
     }
 
-    if (elLeft) elLeft.textContent = String(Math.max(0, Math.min(STATE.bombs, STATE.rows * STATE.cols - 1) - flags));
+    if (elLeft) {
+      const maxBombs = Math.min(STATE.bombs, STATE.rows * STATE.cols - 1);
+      elLeft.textContent = String(Math.max(0, maxBombs - flags));
+    }
   }
 
   // ——— Rozgrywka ———
@@ -350,10 +354,13 @@ export function mount(root) {
   if (elBoard) {
     elBoard.addEventListener("click", (e)=>{
       if (STATE.gameOver) return;
-      const cell = e.target;
-      if (!cell || cell.dataset.x === undefined) return;
-      const x = +cell.dataset.x, y = +cell.dataset.y;
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      const dx = target.dataset.x;
+      const dy = target.dataset.y;
+      if (dx === undefined || dy === undefined) return;
 
+      const x = +dx, y = +dy;
       reveal(x,y);
       updateDisplay();
 
@@ -363,10 +370,13 @@ export function mount(root) {
     elBoard.addEventListener("contextmenu", (e)=>{
       e.preventDefault();
       if (STATE.gameOver) return;
-      const cell = e.target;
-      if (!cell || cell.dataset.x === undefined) return;
-      const x = +cell.dataset.x, y = +cell.dataset.y;
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      const dx = target.dataset.x;
+      const dy = target.dataset.y;
+      if (dx === undefined || dy === undefined) return;
 
+      const x = +dx, y = +dy;
       if (!STATE.revealed[y][x]) {
         STATE.flagged[y][x] = !STATE.flagged[y][x];
       }
@@ -421,3 +431,13 @@ export function mount(root) {
       if (elGame) elGame.style.display = "block";
       if (elEnd)  elEnd.style.display  = "none";
       if (elLeft) elLeft.textContent   = String(STATE.bombs);
+      if (elTime) elTime.textContent   = "0.0";
+    };
+  }
+}
+
+export function unmount(root) {
+  root.innerHTML = "";
+}
+
+export default { mount, unmount };
