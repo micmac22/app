@@ -4,7 +4,7 @@ import {
   norm,
   isNameMatch,
   sample,
-  // DODANE: używamy wspólnej tokenizacji i metryki DL do elastycznego dopasowania nazw
+  // WAŻNE: NIE importujemy już isCodeMatch — będzie lokalny matcher ścisły
   tokenize,
   sigTokens,
   dl
@@ -24,32 +24,37 @@ import {
 // - Eksport CSV z BOM i średnikiem (zgodność z Excel PL)
 // - Restart: pełny reset stanu
 // - TRYB "shorten" (nazwa→kod): ścisłe dopasowanie kodu (case-insensitive),
-//   bez zmiany kolejności liter i bez tolerancji na spacje/znaki
+//   bez zmiany kolejności liter, bez tolerancji na spacje i znaki specjalne
 // ==========================================
 
+/** Konfiguracja dopasowań nazw (expand) */
+const MATCH_CFG = Object.freeze({
+  TOKEN_MATCH_RATIO: 0.8, // ≥80% istotnych tokenów musi się dopasować
+  DL_TOKEN: 1,            // tolerancja DL na poziomie tokenu
+  DL_GLOBAL: 2,           // fallback global: DL(bez spacji) ≤ 2
+  DL_GLOBAL_LEN_DIFF: 2   // różnica długości dla fallbacku ≤ 2
+});
+
 // === DOPASOWANIE NAZW dla trybu "expand" ===
-// Zasady (w tej wersji):
-// 1) Odfiltruj słowa ogólne (sigTokens).
-// 2) Wymagaj dopasowania ≥80% istotnych tokenów (tolerancja DL<=1 na token).
-// 3) Fallback: jeśli pełne porównanie "bez spacji" ma DL<=2 i różnica długości <=2 — akceptuj.
-function isNameMatchExpand(input, correct) {
+function isNameMatchExpand(input, correct, cfg = MATCH_CFG) {
   const A = tokenize(input || "");
   const B = tokenize(correct || "");
   const AT = sigTokens(A);
   const BT = sigTokens(B);
 
-  // Jeśli brak istotnych tokenów po stronie poprawnej nazwy — użyj ogólnego isNameMatch
   if (!BT.length) return isNameMatch(input, correct);
 
   // Wymagaj dopasowania ≥80% istotnych tokenów (z tolerancją DL<=1 na token)
-  const matches = BT.filter(bt => AT.some(at => dl(at, bt) <= 1)).length;
+  const matches = BT.filter(bt => AT.some(at => dl(at, bt) <= cfg.DL_TOKEN)).length;
   const ratio = BT.length ? (matches / BT.length) : 1;
-  if (ratio >= 0.8) return true;
+  if (ratio >= cfg.TOKEN_MATCH_RATIO) return true;
 
   // Fallback: drobna globalna literówka w całym ciągu
   const AS = norm(input).replace(/\s+/g, "");
   const BS = norm(correct).replace(/\s+/g, "");
-  if (Math.abs(AS.length - BS.length) <= 2 && dl(AS, BS) <= 2) return true;
+  if (Math.abs(AS.length - BS.length) <= cfg.DL_GLOBAL_LEN_DIFF && dl(AS, BS) <= cfg.DL_GLOBAL) {
+    return true;
+  }
 
   return false;
 }
@@ -57,9 +62,20 @@ function isNameMatchExpand(input, correct) {
 // === ŚCISŁE DOPASOWANIE KODU dla trybu "shorten" ===
 // Wymagania: odpowiedź musi być identyczna jak poprawny kod,
 // ignorujemy wyłącznie wielkość liter. Nie usuwamy spacji ani znaków.
+// Dodatkowo: walidujemy format — tylko litery/cyfry (dopasuj do swojej domeny).
+function isValidCodeFormat(s) {
+  // Jeśli w Twojej domenie kody mogą zawierać np. myślnik, dostosuj regex.
+  return /^[A-Z0-9]+$/i.test(s);
+}
 function isCodeMatchStrict(input, correct) {
+  // Normalizacja
   const a = String(input ?? '').trim();
   const b = String(correct ?? '').trim();
+
+  // Twarda walidacja formatu po stronie odpowiedzi użytkownika
+  if (!isValidCodeFormat(a)) return false;
+
+  // EXACT match (case-insensitive), bez zmian kolejności, bez tolerancji
   return a.toUpperCase() === b.toUpperCase();
 }
 
@@ -265,7 +281,7 @@ export function mount(root) {
       STATE.cats.expand.total += 1;
       if (ok) STATE.cats.expand.ok += 1;
     } else {
-      // ŚCISŁE dopasowanie kodu (case-insensitive, bez tolerancji znaków)
+      // ŚCISŁE dopasowanie kodu (case-insensitive, bez tolerancji znaków i kolejności)
       ok = isCodeMatchStrict(val, q.correct);
       STATE.cats.shorten.total += 1;
       if (ok) STATE.cats.shorten.ok += 1;
@@ -390,3 +406,94 @@ export function mount(root) {
     const tick = () => {
       const sec = Math.max(0, (nowMs() - STATE.startAt) / 1000);
       const el = $("#exp_timer");
+      if (el) el.textContent = sec.toFixed(1);
+    };
+    if (STATE.timerId) clearInterval(STATE.timerId);
+    STATE.timerId = setInterval(tick, 100);
+    tick();
+  }
+
+  // Eksport wyników do CSV (BOM + średnik; zgodność z Excel PL)
+  function csvSanitize(v) {
+    const s = String(v ?? '');
+    // Excel CSV Injection guard
+    return /^[=+\-@]/.test(s) ? `'${s.replace(/"/g,'""')}` : s.replace(/"/g,'""');
+  }
+  function exportCSV(rows, filename='wynik_expand.csv') {
+    if (!rows.length) {
+      alert("Brak danych do eksportu.");
+      return;
+    }
+    const header = Object.keys(rows[0]).join(';');
+    const body = rows.map(r =>
+      Object.values(r).map(v => `"${csvSanitize(v)}"`).join(';')
+    ).join('\n');
+    const csv = '\uFEFF' + header + '\n' + body; // BOM
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // === Zdarzenia ===
+  $("#exp_start").onclick = () => {
+    const pool = buildPool($("#exp_region").value);
+    const mode = $("#exp_mode").value;
+    const cnt = Math.max(1, Math.min(parseInt($("#exp_count").value || "0", 10), pool.length));
+
+    STATE.pool = pool;
+    STATE.questions = makeExpandQuestions(pool, mode, cnt);
+    STATE.idx = 0; STATE.ok = 0; STATE.bad = 0;
+    STATE.times = [];
+    STATE.review = [];
+    STATE.cats = { expand: { ok:0, total:0 }, shorten: { ok:0, total:0 } };
+
+    $("#expSetup").style.display = "none";
+    $("#expQuiz").style.display = "block";
+    $("#expResult").style.display = "none";
+
+    startStopwatch();
+    renderQuestion();
+  };
+
+  $("#exp_check").onclick = check;
+  $("#exp_next").onclick = next;
+  $("#exp_prev").onclick = prev;
+
+  // ENTER: jeśli nie sprawdzone → sprawdź; jeśli sprawdzone → następne
+  $("#exp_input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      const q = STATE.questions[STATE.idx];
+      if (!q._checked) check();
+      else next();
+    }
+  });
+
+  $("#exp_export").onclick = () => exportCSV(STATE.review);
+
+  $("#exp_restart").onclick = () => {
+    if (STATE.timerId) { clearInterval(STATE.timerId); STATE.timerId = null; }
+    Object.assign(STATE, {
+      pool: [],
+      questions: [],
+      idx: 0, ok: 0, bad: 0,
+      startAt: 0, timerId: null,
+      times: [], review: [],
+      cats: { expand: { ok:0, total:0 }, shorten: { ok:0, total:0 } }
+    });
+    $("#expResult").style.display = "none";
+    $("#expSetup").style.display = "block";
+  };
+}
+
+export function unmount(root) {
+  // Bezpieczne sprzątanie
+  try {
+    // nie trzymamy tu globalnych interwałów — wszystko w STATE lokalnym, który zniknie
+  } catch {}
+  root.innerHTML = "";
+}
