@@ -21,7 +21,7 @@
       "saper": {
       "name": "💣 Saper",
       "entry": "modules/saper/index.js",
-        "hidden":false
+        "hidden":true
     
     },
     "clusters": {
