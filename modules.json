@@ -19,9 +19,9 @@
     
     },
       "saper": {
-      "name": "Saper",
+      "name": "💣 Saper",
       "entry": "modules/saper/index.js",
-        "hidden":true
+        "hidden":false
     
     },
     "clusters": {
