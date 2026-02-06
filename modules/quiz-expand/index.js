@@ -3,9 +3,7 @@ import {
   DEFAULT_REGION2,
   norm,
   isNameMatch,
-  isCodeMatch,
   sample,
-  loadCustomRegionData,
   // DODANE: używamy wspólnej tokenizacji i metryki DL do elastycznego dopasowania nazw
   tokenize,
   sigTokens,
@@ -14,22 +12,26 @@ import {
 
 // ==========================================
 // TRYB: Rozszerzanie skrótów + Podaj skrót
-// Dodatki:
+// Dodatki (w tej wersji):
 // - ENTER: (1) sprawdź → (2) następne
-// - Elastyczne dopasowanie NAZW (expand) z ignorowaniem słów ogólnych
+// - Elastyczne dopasowanie NAZW (expand): ≥80% istotnych tokenów z DL<=1
+// - Fallback globalny: DL<=2 dla całego ciągu bez spacji
+// - Pasek postępu liczony z uwzględnieniem sprawdzenia bieżącego pytania
+// - Blokada "→" dopóki pytanie nie jest sprawdzone (brak auto-check przy Next)
 // - Licznik czasu sesji (stoper)
-// - Statystyki: dokładność, ŚREDNIA/ MEDIANA/ MIN/ MAX czasu
+// - Statystyki: dokładność, ŚREDNIA/ MEDIANA/ MIN/ MAX/ P95 czasu
 // - Rozbicie dokładności na tryb expand/shorten
-// - Eksport CSV z detalami (pytanie, odpowiedź, czas, wynik)
+// - Eksport CSV z BOM i średnikiem (zgodność z Excel PL)
+// - Restart: pełny reset stanu
+// - TRYB "shorten" (nazwa→kod): ścisłe dopasowanie kodu (case-insensitive),
+//   bez zmiany kolejności liter i bez tolerancji na spacje/znaki
 // ==========================================
 
 // === DOPASOWANIE NAZW dla trybu "expand" ===
-// Zasady:
-// 1) Odfiltruj słowa ogólne (sigTokens już to robi na podstawie COMMON_WORDS w shared).
-// 2) Każdy istotny token poprawnej nazwy musi wystąpić w odpowiedzi
-//    (z tolerancją na jedną literówkę lub przestawienie liter => DL<=1).
-// 3) Dodatkowy fallback: jeśli pełne porównanie "bez spacji" ma
-//    DL<=2 i różnica długości <=2 — akceptuj (globalna drobna literówka).
+// Zasady (w tej wersji):
+// 1) Odfiltruj słowa ogólne (sigTokens).
+// 2) Wymagaj dopasowania ≥80% istotnych tokenów (tolerancja DL<=1 na token).
+// 3) Fallback: jeśli pełne porównanie "bez spacji" ma DL<=2 i różnica długości <=2 — akceptuj.
 function isNameMatchExpand(input, correct) {
   const A = tokenize(input || "");
   const B = tokenize(correct || "");
@@ -39,9 +41,10 @@ function isNameMatchExpand(input, correct) {
   // Jeśli brak istotnych tokenów po stronie poprawnej nazwy — użyj ogólnego isNameMatch
   if (!BT.length) return isNameMatch(input, correct);
 
-  // Wymagaj dopasowania wszystkich istotnych tokenów (z tolerancją DL<=1 na token)
-  const allKeyTokensPresent = BT.every(bt => AT.some(at => dl(at, bt) <= 1));
-  if (allKeyTokensPresent) return true;
+  // Wymagaj dopasowania ≥80% istotnych tokenów (z tolerancją DL<=1 na token)
+  const matches = BT.filter(bt => AT.some(at => dl(at, bt) <= 1)).length;
+  const ratio = BT.length ? (matches / BT.length) : 1;
+  if (ratio >= 0.8) return true;
 
   // Fallback: drobna globalna literówka w całym ciągu
   const AS = norm(input).replace(/\s+/g, "");
@@ -49,6 +52,15 @@ function isNameMatchExpand(input, correct) {
   if (Math.abs(AS.length - BS.length) <= 2 && dl(AS, BS) <= 2) return true;
 
   return false;
+}
+
+// === ŚCISŁE DOPASOWANIE KODU dla trybu "shorten" ===
+// Wymagania: odpowiedź musi być identyczna jak poprawny kod,
+// ignorujemy wyłącznie wielkość liter. Nie usuwamy spacji ani znaków.
+function isCodeMatchStrict(input, correct) {
+  const a = String(input ?? '').trim();
+  const b = String(correct ?? '').trim();
+  return a.toUpperCase() === b.toUpperCase();
 }
 
 export function mount(root) {
@@ -103,7 +115,7 @@ export function mount(root) {
         <button id="exp_check">✓ Sprawdź</button>
       </div>
 
-      <div id="exp_feedback" style="margin-top:8px;"></div>
+      <div id="exp_feedback" style="margin-top:8px;" aria-live="polite"></div>
 
       <div class="row" style="justify-content:space-between;margin-top:12px;">
         <button id="exp_prev" class="secondary">←</button>
@@ -215,6 +227,15 @@ export function mount(root) {
     });
   }
 
+  // Pasek postępu: uwzględnia, czy bieżące pytanie jest już sprawdzone
+  function updateProgress() {
+    const total = STATE.questions.length || 0;
+    const curr = STATE.idx;
+    const checked = STATE.questions[curr]?._checked ? 1 : 0;
+    const pct = total ? Math.round(100 * (curr + checked) / total) : 0;
+    $("#progress").style.width = pct + "%";
+  }
+
   function renderQuestion() {
     const q = STATE.questions[STATE.idx];
     q._checked = false;
@@ -228,9 +249,7 @@ export function mount(root) {
     $("#exp_curr").textContent = STATE.idx + 1;
     $("#exp_total").textContent = STATE.questions.length;
 
-    const pct = Math.round(100 * STATE.idx / STATE.questions.length);
-    $("#progress").style.width = pct + "%";
-
+    updateProgress();
     $("#exp_input").focus();
   }
 
@@ -246,7 +265,8 @@ export function mount(root) {
       STATE.cats.expand.total += 1;
       if (ok) STATE.cats.expand.ok += 1;
     } else {
-      ok = isCodeMatch(val, q.correct);
+      // ŚCISŁE dopasowanie kodu (case-insensitive, bez tolerancji znaków)
+      ok = isCodeMatchStrict(val, q.correct);
       STATE.cats.shorten.total += 1;
       if (ok) STATE.cats.shorten.ok += 1;
     }
@@ -277,14 +297,17 @@ export function mount(root) {
 
     $("#exp_ok").textContent = STATE.ok;
     $("#exp_bad").textContent = STATE.bad;
+
+    updateProgress();
   }
 
   function next() {
     const q = STATE.questions[STATE.idx];
-    // Jeśli użytkownik kliknie "→" bez sprawdzenia, automatycznie sprawdź,
-    // aby każda pozycja miała czas i wynik
-    if (!q._checked) check();
-
+    // ZABLOKUJ przejście dalej dopóki nie sprawdzono odpowiedzi
+    if (!q._checked) {
+      $("#exp_feedback").innerHTML = `<div class="feedback warn">Najpierw sprawdź odpowiedź (Enter lub “✓ Sprawdź”).</div>`;
+      return;
+    }
     if (STATE.idx < STATE.questions.length - 1) {
       STATE.idx++;
       renderQuestion();
@@ -303,7 +326,13 @@ export function mount(root) {
     const a = [...arr].sort((x,y)=>x-y);
     const m = Math.floor(a.length/2);
     return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
-    // Wynik w sekundach (float)
+  }
+
+  function percentile(arr, p) {
+    if (!arr.length) return 0;
+    const a = [...arr].sort((x,y)=>x-y);
+    const idx = Math.ceil((p/100) * a.length) - 1;
+    return a[Math.max(0, Math.min(idx, a.length - 1))];
   }
 
   function finish() {
@@ -330,6 +359,7 @@ export function mount(root) {
     const med = median(times);
     const fastest = count ? Math.min(...times) : 0;
     const slowest = count ? Math.max(...times) : 0;
+    const p95 = percentile(times, 95);
 
     const sesElapsed = Math.max(0, (nowMs() - STATE.startAt) / 1000);
 
@@ -337,6 +367,7 @@ export function mount(root) {
       <li>⏱️ Czas sesji: <strong>${sesElapsed.toFixed(2)} s</strong></li>
       <li>⚡ Średni czas na pytanie: <strong>${avg.toFixed(2)} s</strong></li>
       <li>📍 Mediana czasu na pytanie: <strong>${med.toFixed(2)} s</strong></li>
+      <li>🎯 P95 czasu: <strong>${p95.toFixed(2)} s</strong></li>
       <li>🏃‍♂️ Najszybciej: <strong>${fastest.toFixed(2)} s</strong>, 🐢 Najwolniej: <strong>${slowest.toFixed(2)} s</strong></li>
     `;
 
@@ -359,80 +390,3 @@ export function mount(root) {
     const tick = () => {
       const sec = Math.max(0, (nowMs() - STATE.startAt) / 1000);
       const el = $("#exp_timer");
-      if (el) el.textContent = sec.toFixed(1);
-    };
-    if (STATE.timerId) clearInterval(STATE.timerId);
-    STATE.timerId = setInterval(tick, 100);
-    tick();
-  }
-
-  // Eksport wyników do CSV
-  function exportCSV(rows, filename='wynik_expand.csv') {
-    if (!rows.length) {
-      alert("Brak danych do eksportu.");
-      return;
-    }
-    const header = Object.keys(rows[0]).join(',');
-    const body = rows.map(r =>
-      Object.values(r).map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')
-    ).join('\n');
-    const blob = new Blob([header + '\n' + body], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  // === Zdarzenia ===
-  $("#exp_start").onclick = () => {
-    const pool = buildPool($("#exp_region").value);
-    const mode = $("#exp_mode").value;
-    const cnt = Math.max(1, Math.min(parseInt($("#exp_count").value || "0", 10), pool.length));
-
-    STATE.pool = pool;
-    STATE.questions = makeExpandQuestions(pool, mode, cnt);
-    STATE.idx = 0; STATE.ok = 0; STATE.bad = 0;
-    STATE.times = [];
-    STATE.review = [];
-    STATE.cats = { expand: { ok:0, total:0 }, shorten: { ok:0, total:0 } };
-
-    $("#expSetup").style.display = "none";
-    $("#expQuiz").style.display = "block";
-    $("#expResult").style.display = "none";
-
-    startStopwatch();
-    renderQuestion();
-  };
-
-  $("#exp_check").onclick = check;
-  $("#exp_next").onclick = next;
-  $("#exp_prev").onclick = prev;
-
-  // ENTER: jeśli nie sprawdzone → sprawdź; jeśli sprawdzone → następne
-  $("#exp_input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopPropagation();
-      const q = STATE.questions[STATE.idx];
-      if (!q._checked) check();
-      else next();
-    }
-  });
-
-  $("#exp_export").onclick = () => exportCSV(STATE.review);
-
-  $("#exp_restart").onclick = () => {
-    if (STATE.timerId) { clearInterval(STATE.timerId); STATE.timerId = null; }
-    $("#expResult").style.display = "none";
-    $("#expSetup").style.display = "block";
-  };
-}
-
-export function unmount(root) {
-  // Bezpieczne sprzątanie
-  try {
-    // nie trzymamy tu globalnych interwałów — wszystko w STATE lokalnym, który zniknie
-  } catch {}
-  root.innerHTML = "";
-}
