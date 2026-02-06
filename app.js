@@ -20,15 +20,51 @@ function showError(host, err, entry) {
 
 // ===== Stan aplikacji =====
 let currentModule = null;   // przestrzeń nazw importu (named) lub obiekt default
-let currentEntry = null;
-let currentHost  = null;
-let loadToken    = 0;       // licznik do rozstrzygania wyścigów
-let modulesCache = null;    // cache modules.json
+let currentEntry  = null;
+let currentHost   = null;
+let loadToken     = 0;      // licznik do rozstrzygania wyścigów
+let modulesCache  = null;   // cache modules.json
+
+// ===== Build ID do bustowania cache (próbuje meta[name=build-id], inaczej timestamp) =====
+const BUILD_ID = (() => {
+  const m = document.querySelector('meta[name="build-id"]');
+  return m?.getAttribute('content') || String(Date.now());
+})();
+
+// ===== Resolver ścieżek do modułów =====
+// Przyjmuje:
+//  - "saper"                   -> "./modules/saper/index.js"
+//  - "modules/saper/index.js"  -> "./modules/saper/index.js"
+//  - absolutne "https://..."   -> (pozostawia bez zmian) – niezalecane na GH Pages
+function resolveEntry(entry) {
+  if (!entry) throw new Error("Brak 'entry' dla modułu.");
+  let e = String(entry).trim();
+
+  // Jeśli to krótka forma (bez .js i bez http), zbuduj pełną ścieżkę:
+  const isHttp = /^https?:\/\//i.test(e);
+  const hasJs  = /\.js$/i.test(e);
+
+  if (!isHttp && !hasJs) {
+    // np. "saper" -> "modules/saper/index.js"
+    e = `modules/${e}/index.js`;
+  }
+
+  // Zapewnij ścieżkę względną (dla GH Pages i lokalnie)
+  if (!isHttp && !e.startsWith("./")) {
+    e = `./${e}`;
+  }
+
+  // Zbuduj finalny URL względem bieżącego dokumentu
+  return new URL(e, window.location.href);
+}
 
 // ===== API =====
 async function loadModulesList() {
-  if (modulesCache) return modulesCache;  // cache
+  if (modulesCache) return modulesCache; // cache
+
+  // modules.json musi być serwowany z tego samego katalogu co index.html
   const res = await fetch("modules.json", { cache: "no-cache" });
+  if (!res.ok) throw new Error(`Nie można pobrać modules.json (${res.status})`);
   const data = await res.json();
   modulesCache = data.modules;
   return modulesCache;
@@ -55,8 +91,14 @@ async function mountModule(entry, btnEl) {
   setActiveButton(btnEl);
 
   try {
-    // Dynamiczny import — ważne: względnie do app.js
-    const ns = await import("./" + entry);
+    // 1) Rozwiąż ścieżkę względem bieżącej lokalizacji strony
+    const url = resolveEntry(entry);
+
+    // 2) Bustowanie cache (GH Pages bywa agresywny)
+    url.searchParams.set('v', BUILD_ID);
+
+    // 3) Dynamiczny import (wymuś literalny URL – bez bundlingu)
+    const ns = await import(/* @vite-ignore */ url.href);
 
     // Jeżeli w międzyczasie kliknięto inny moduł — przerwij
     if (myToken !== loadToken) return;
@@ -70,15 +112,12 @@ async function mountModule(entry, btnEl) {
 
     // Wyczyść host i montuj
     host.innerHTML = "";
-    mod.mount(host);
+    await mod.mount(host);
 
     // Zapamiętaj kontekst
     currentModule = mod;
     currentEntry  = entry;
     currentHost   = host;
-
-    // Opcjonalnie: prefetch tego samego modułu (nic nie robi, ale przeglądarka może cache'ować)
-    // await import(/* @vite-ignore */ "./" + entry);
 
   } catch (err) {
     if (myToken !== loadToken) return; // inny moduł już ładowany
@@ -94,20 +133,24 @@ async function init() {
   menu.innerHTML = "";
 
   // Zbuduj przyciski
-for (const key in modules) {
-  const modInfo = modules[key];
+  for (const key in modules) {
+    const modInfo = modules[key];
+    if (modInfo.hidden) continue;   // ⬅️ IGNORUJ UKRYTE MODUŁY
 
-  if (modInfo.hidden) continue;   // ⬅️ IGNORUJ UKRYTE MODUŁY
+    const btn = document.createElement("button");
+    btn.textContent = modInfo.name || key;
 
-  const btn = document.createElement("button");
-  btn.textContent = modInfo.name;
-  btn.onclick = () => mountModule(modInfo.entry, btn);
-  menu.appendChild(btn);
-}
+    // Uwaga: dopuszczamy dwie formy wpisu:
+    //  - modInfo.entry === "saper" (krótko)
+    //  - modInfo.entry === "modules/saper/index.js" (pełna ścieżka)
+    const entry = modInfo.entry || key;
+
+    btn.onclick = () => mountModule(entry, btn);
+    menu.appendChild(btn);
+  }
 }
 
 init();
 
 // (Opcjonalnie) Eksportuj mountModule do debugowania z konsoli
 // window.mountModule = mountModule;
-
