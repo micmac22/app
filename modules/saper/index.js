@@ -1,41 +1,64 @@
 // modules/saper/index.js
 
 export function mount(root) {
-  // ——— Jednorazowe style (wygląd pól: normal, revealed, flag, bomb) ———
+  // ——— Jednorazowe style (centrowanie, wyraźne krawędzie, wygląd pól) ———
   if (!document.getElementById("saperStyles")) {
     const style = document.createElement("style");
     style.id = "saperStyles";
     style.textContent = `
+      /* Centrowanie całego modułu wewnątrz hosta */
+      .saper_center {
+        min-height: 70vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+      }
+      .saper_cardwrap {
+        width: 100%;
+        max-width: 1100px;
+      }
+      .sap_board_wrap {
+        margin: 0 auto;
+      }
+
+      /* Siatka i komórki */
       .sap_grid { display:grid; gap:2px; }
 
       .sap_cell {
         width: 32px; height: 32px;
         display:flex; align-items:center; justify-content:center;
         user-select:none; cursor:pointer; font-weight:700; font-size:17px;
-        background:#e5e7eb;
-        border:1px solid #cbd5e1;
-        box-shadow: 0 1px 0 #ffffff80 inset, 0 -1px 0 #0000000d inset; /* lekkie uwypuklenie */
-        transition: background .12s, box-shadow .12s, color .12s;
-      }
-      .sap_cell:hover { filter: brightness(1.05); }
 
+        /* Wyraźniejsze krawędzie i kontrast */
+        background:#e5e7eb; /* base */
+        border:1px solid #9aa4b2; /* ciemniejsze od #cbd5e1 */
+        box-shadow:
+          0 1px 0 #ffffff99 inset,  /* górny „brzeg” jaśniejszy */
+          0 -1px 0 #0000001a inset; /* dolny cień */
+        transition: background .12s, box-shadow .12s, color .12s, transform .04s;
+      }
+      .sap_cell:hover { filter: brightness(1.04); }
+      .sap_cell:active { transform: translateY(0.5px); }
+
+      /* Odkryte pole: wyraźne „wciśnięcie” (sunken) i jaśniejsze tło */
       .sap_cell--revealed {
-        background:#f1f5f9;
+        background:#f8fafc;
         cursor:default;
-        box-shadow: inset 0 2px 2px rgba(0,0,0,.08); /* wciśnięte */
+        box-shadow: inset 0 2px 2px rgba(0,0,0,.18), inset 0 -1px 1px rgba(255,255,255,.6);
+        border-color:#94a3b8; /* nieco ciemniejsze obramowanie dla kontrastu */
       }
-      .sap_cell--flag {
-        background:#fde047;
-      }
-      .sap_cell--bomb {
-        background:#f87171; color:#111;
-      }
+
+      /* Flaga i bomba – silny kontrast */
+      .sap_cell--flag { background:#fde047; border-color:#d4b400; }
+      .sap_cell--bomb { background:#f87171; color:#111; border-color:#b91c1c; }
+
       /* Kolory cyfr jak w klasycznym Saperze */
       .num-1 { color:#1d4ed8; } /* niebieski */
       .num-2 { color:#15803d; } /* zielony */
       .num-3 { color:#b91c1c; } /* czerwony */
       .num-4 { color:#1e3a8a; } /* ciemny nieb. */
-      .num-5 { color:#4b5563; } /* szary */
+      .num-5 { color:#374151; } /* ciemny szary */
       .num-6 { color:#0e7490; } /* cyjan */
       .num-7 { color:#7c3aed; } /* fiolet */
       .num-8 { color:#111827; } /* prawie czarny */
@@ -45,73 +68,86 @@ export function mount(root) {
 
   // ——— UI ———
   root.innerHTML = `
-    <section class="card" id="saper_menu">
-      <h2>💣 Saper</h2>
+    <div class="saper_center">
+      <div class="saper_cardwrap">
 
-      <div class="grid" style="margin-top:10px;">
-        <label>Rozmiar planszy
-          <select id="sap_size">
-            <option value="8">8×8 (łatwy)</option>
-            <option value="12" selected>12×12 (średni)</option>
-            <option value="16">16×16 (trudny)</option>
-          </select>
-        </label>
+        <section class="card" id="saper_menu">
+          <h2>💣 Saper</h2>
 
-        <label>Ilość bomb
-          <input id="sap_bombs" type="number" min="5" max="150" value="20">
-        </label>
+          <div class="grid" style="margin-top:10px;">
+            <label>Szerokość (kolumny) – max 30
+              <input id="sap_cols" type="number" min="4" max="30" value="12">
+            </label>
+
+            <label>Wysokość (wiersze) – max 30
+              <input id="sap_rows" type="number" min="4" max="30" value="12">
+            </label>
+
+            <label>Ilość bomb
+              <input id="sap_bombs" type="number" min="1" max="150" value="20">
+            </label>
+          </div>
+
+          <div style="margin-top:12px;">
+            <button id="sap_start">🎮 Start</button>
+          </div>
+
+          <p class="muted" style="margin-top:8px;">PPM = flaga 🚩, LPM = odkryj pole.</p>
+        </section>
+
+        <section class="card" id="saper_game" style="display:none;">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <div>⏱️ <span id="sap_time">0.0</span>s</div>
+            <div>💣 <span id="sap_left">0</span></div>
+          </div>
+
+          <div class="sap_board_wrap" style="margin-top:12px;">
+            <div id="sap_board" class="sap_grid"></div>
+          </div>
+
+          <div style="margin-top:12px; text-align:center;">
+            <button id="sap_back">◀️ Do menu</button>
+          </div>
+        </section>
+
+        <section class="card" id="saper_end" style="display:none; text-align:center;">
+          <h2 id="sap_end_title">Koniec!</h2>
+          <div style="font-size:40px; font-weight:800;"><span id="sap_end_status"></span></div>
+          <div class="muted" style="margin-top:6px;">Czas: <span id="sap_end_time">0.0</span>s</div>
+
+          <div style="margin-top:12px;">
+            <button id="sap_restart" class="success">🔄 Jeszcze raz</button>
+          </div>
+        </section>
+
       </div>
-
-      <div style="margin-top:12px;">
-        <button id="sap_start">🎮 Start</button>
-      </div>
-
-      <p class="muted" style="margin-top:8px;">PPM = flaga 🚩, LPM = odkryj pole.</p>
-    </section>
-
-    <section class="card" id="saper_game" style="display:none;">
-      <div class="row" style="justify-content:space-between;align-items:center;">
-        <div>⏱️ <span id="sap_time">0.0</span>s</div>
-        <div>💣 <span id="sap_left">0</span></div>
-      </div>
-
-      <div id="sap_board" class="sap_grid" style="margin-top:12px;"></div>
-
-      <div style="margin-top:12px;">
-        <button id="sap_back">◀️ Do menu</button>
-      </div>
-    </section>
-
-    <section class="card" id="saper_end" style="display:none; text-align:center;">
-      <h2 id="sap_end_title">Koniec!</h2>
-      <div style="font-size:40px; font-weight:800;"><span id="sap_end_status"></span></div>
-      <div class="muted" style="margin-top:6px;">Czas: <span id="sap_end_time">0.0</span>s</div>
-
-      <div style="margin-top:12px;">
-        <button id="sap_restart" class="success">🔄 Jeszcze raz</button>
-      </div>
-    </section>
+    </div>
   `;
 
   // ——— Helper selektor ———
   const $ = (sel) => root.querySelector(sel);
 
-  // Cache elementów (unikamy pomyłek w id + null guard)
-  const elMenu  = $("#saper_menu");
-  const elGame  = $("#saper_game");
-  const elEnd   = $("#saper_end");
-  const elBoard = $("#sap_board");
-  const elTime  = $("#sap_time");
-  const elLeft  = $("#sap_left");
-  const elStart = $("#sap_start");
-  const elBack  = $("#sap_back");
-  const elRestart = $("#sap_restart");
+  // Cache elementów
+  const elMenu   = $("#saper_menu");
+  const elGame   = $("#saper_game");
+  const elEnd    = $("#saper_end");
+  const elBoard  = $("#sap_board");
+  const elTime   = $("#sap_time");
+  const elLeft   = $("#sap_left");
+  const elStart  = $("#sap_start");
+  const elBack   = $("#sap_back");
+  const elRestart= $("#sap_restart");
   const elEndTitle  = $("#sap_end_title");
   const elEndStatus = $("#sap_end_status");
   const elEndTime   = $("#sap_end_time");
 
+  const inpCols = $("#sap_cols");
+  const inpRows = $("#sap_rows");
+  const inpBomb = $("#sap_bombs");
+
   const STATE = {
-    size: 12,
+    rows: 12,         // wysokość
+    cols: 12,         // szerokość
     bombs: 20,
     board: [],        // 2D: "B" | number
     revealed: [],     // 2D: bool
@@ -125,9 +161,9 @@ export function mount(root) {
   // ——— Logika ———
 
   function initEmptyBoard() {
-    STATE.board   = Array.from({ length: STATE.size }, () => Array(STATE.size).fill(0));
-    STATE.revealed= Array.from({ length: STATE.size }, () => Array(STATE.size).fill(false));
-    STATE.flagged = Array.from({ length: STATE.size }, () => Array(STATE.size).fill(false));
+    STATE.board    = Array.from({ length: STATE.rows }, () => Array(STATE.cols).fill(0));
+    STATE.revealed = Array.from({ length: STATE.rows }, () => Array(STATE.cols).fill(false));
+    STATE.flagged  = Array.from({ length: STATE.rows }, () => Array(STATE.cols).fill(false));
   }
 
   function neighbors(x, y) {
@@ -138,12 +174,12 @@ export function mount(root) {
     ];
     return dirs
       .map(([dx,dy]) => [x+dx, y+dy])
-      .filter(([nx, ny]) => nx>=0 && ny>=0 && nx<STATE.size && ny<STATE.size);
+      .filter(([nx, ny]) => nx>=0 && ny>=0 && nx<STATE.cols && ny<STATE.rows);
   }
 
   function calcNumbers() {
-    for (let y=0; y<STATE.size; y++) {
-      for (let x=0; x<STATE.size; x++) {
+    for (let y=0; y<STATE.rows; y++) {
+      for (let x=0; x<STATE.cols; x++) {
         if (STATE.board[y][x] === "B") continue;
         const count = neighbors(x,y).filter(([nx,ny]) => STATE.board[ny][nx] === "B").length;
         STATE.board[y][x] = count;
@@ -156,10 +192,10 @@ export function mount(root) {
     // start od pustej
     initEmptyBoard();
 
-    let b = STATE.bombs;
+    let b = Math.min(STATE.bombs, STATE.rows * STATE.cols - 1);
     while (b > 0) {
-      const x = Math.floor(Math.random() * STATE.size);
-      const y = Math.floor(Math.random() * STATE.size);
+      const x = Math.floor(Math.random() * STATE.cols);
+      const y = Math.floor(Math.random() * STATE.rows);
       if (x === safeX && y === safeY) continue;     // pierwsze kliknięcie bezpieczne
       if (STATE.board[y][x] !== "B") {
         STATE.board[y][x] = "B";
@@ -185,13 +221,17 @@ export function mount(root) {
     }
   }
 
+  // ——— Rysowanie ———
+
   function drawBoard() {
     if (!elBoard) return;
-    elBoard.style.gridTemplateColumns = `repeat(${STATE.size}, 32px)`;
+
+    // Ustaw szerokość siatki wg liczby kolumn
+    elBoard.style.gridTemplateColumns = `repeat(${STATE.cols}, 32px)`;
     elBoard.innerHTML = "";
 
-    for (let y=0; y<STATE.size; y++) {
-      for (let x=0; x<STATE.size; x++) {
+    for (let y=0; y<STATE.rows; y++) {
+      for (let x=0; x<STATE.cols; x++) {
         const cell = document.createElement("div");
         cell.dataset.x = x;
         cell.dataset.y = y;
@@ -204,19 +244,18 @@ export function mount(root) {
 
   function updateDisplay() {
     if (!elBoard) return;
-
     let flags = 0;
 
-    for (let y=0; y<STATE.size; y++) {
-      for (let x=0; x<STATE.size; x++) {
-        const cell = elBoard.children[y*STATE.size + x];
+    for (let y=0; y<STATE.rows; y++) {
+      for (let x=0; x<STATE.cols; x++) {
+        const cell = elBoard.children[y*STATE.cols + x];
         if (!cell) continue;
 
         const r = STATE.revealed[y]?.[x] ?? false;
         const f = STATE.flagged[y]?.[x] ?? false;
         const v = STATE.board[y]?.[x];
 
-        // Reset klas
+        // Reset klas i zawartości
         cell.className = "sap_cell";
         cell.textContent = "";
 
@@ -241,8 +280,10 @@ export function mount(root) {
       }
     }
 
-    if (elLeft) elLeft.textContent = Math.max(0, STATE.bombs - flags);
+    if (elLeft) elLeft.textContent = String(Math.max(0, Math.min(STATE.bombs, STATE.rows * STATE.cols - 1) - flags));
   }
+
+  // ——— Rozgrywka ———
 
   function reveal(x,y) {
     if (STATE.revealed[y][x] || STATE.flagged[y][x] || STATE.gameOver) return;
@@ -255,8 +296,6 @@ export function mount(root) {
 
     STATE.revealed[y][x] = true;
 
-    // Trafiona bomba po pierwszym kliknięciu nie jest możliwa (safe first),
-    // ale na wszelki wypadek:
     if (STATE.board[y][x] === "B") {
       gameOver(false);
       return;
@@ -268,8 +307,8 @@ export function mount(root) {
   }
 
   function checkWin() {
-    for (let y=0; y<STATE.size; y++) {
-      for (let x=0; x<STATE.size; x++) {
+    for (let y=0; y<STATE.rows; y++) {
+      for (let x=0; x<STATE.cols; x++) {
         if (STATE.board[y][x] !== "B" && !STATE.revealed[y][x]) return false;
       }
     }
@@ -281,15 +320,14 @@ export function mount(root) {
     stopTimer();
 
     // Odsłoń wszystkie bomby
-    for (let y=0; y<STATE.size; y++) {
-      for (let x=0; x<STATE.size; x++) {
+    for (let y=0; y<STATE.rows; y++) {
+      for (let x=0; x<STATE.cols; x++) {
         if (STATE.board[y][x] === "B") {
           STATE.revealed[y][x] = true;
         }
       }
     }
 
-    // Ekrany – null‑safe (błąd, który widziałeś, wynikał z błędnego id)
     if (elGame) elGame.style.display = "none";
     if (elEnd)  elEnd.style.display  = "block";
 
@@ -338,8 +376,14 @@ export function mount(root) {
 
   if (elStart) {
     elStart.onclick = () => {
-      STATE.size  = Math.max(2, parseInt($("#sap_size").value, 10) || 12);
-      STATE.bombs = Math.max(1, Math.min(STATE.size*STATE.size - 1, parseInt($("#sap_bombs").value, 10) || 20));
+      const cols = Math.max(4, Math.min(30, parseInt(inpCols.value, 10) || 12));
+      const rows = Math.max(4, Math.min(30, parseInt(inpRows.value, 10) || 12));
+      let bombs   = Math.max(1, parseInt(inpBomb.value, 10) || 20);
+      bombs = Math.min(bombs, rows * cols - 1); // nie więcej niż pól-1
+
+      STATE.cols = cols;
+      STATE.rows = rows;
+      STATE.bombs = bombs;
 
       STATE.firstClick = true;
       STATE.gameOver   = false;
@@ -348,6 +392,7 @@ export function mount(root) {
       drawBoard();
       startTimer();
 
+      // UI
       if (elMenu) elMenu.style.display = "none";
       if (elGame) elGame.style.display = "block";
       if (elEnd)  elEnd.style.display  = "none";
@@ -376,13 +421,3 @@ export function mount(root) {
       if (elGame) elGame.style.display = "block";
       if (elEnd)  elEnd.style.display  = "none";
       if (elLeft) elLeft.textContent   = String(STATE.bombs);
-      if (elTime) elTime.textContent   = "0.0";
-    };
-  }
-}
-
-export function unmount(root) {
-  root.innerHTML = "";
-}
-
-export default { mount, unmount };
