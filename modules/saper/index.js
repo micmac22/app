@@ -64,6 +64,15 @@ export function mount(root) {
     gameOver: false,
   };
 
+  // ---------- HELPERS ----------
+
+  function initEmptyBoard() {
+    // 2D tablica 0-wek, aby updateDisplay() miał co czytać jeszcze przed 1. kliknięciem
+    STATE.board = Array.from({ length: STATE.size }, () =>
+      Array(STATE.size).fill(0)
+    );
+  }
+
   function neighbors(x, y) {
     const dirs = [
       [-1,-1],[0,-1],[1,-1],
@@ -85,20 +94,17 @@ export function mount(root) {
     }
   }
 
-  // GENEROWANIE Z UWZGLĘDNIENIEM 1 KLIKNIĘCIA
+  // Generowanie bomb po pierwszym kliknięciu (safeX, safeY nie może mieć bomby)
   function generateBoard(safeX, safeY) {
-    const size = STATE.size;
-    const bombs = STATE.bombs;
+    // Zaczynamy od pustej (zerowej) planszy
+    initEmptyBoard();
 
-    STATE.board = Array.from({length:size},()=>Array(size).fill(0));
+    let b = STATE.bombs;
+    while (b > 0) {
+      const x = Math.floor(Math.random() * STATE.size);
+      const y = Math.floor(Math.random() * STATE.size);
 
-    let b = bombs;
-    while (b>0) {
-      const x = Math.floor(Math.random()*size);
-      const y = Math.floor(Math.random()*size);
-
-      if ((x === safeX && y === safeY)) continue;
-
+      if (x === safeX && y === safeY) continue; // pierwsze kliknięcie bezpieczne
       if (STATE.board[y][x] !== "B") {
         STATE.board[y][x] = "B";
         b--;
@@ -124,10 +130,11 @@ export function mount(root) {
     }
   }
 
+  // ---------- RYSOWANIE ----------
+
   function drawBoard() {
     const board = $("#sap_board");
     board.style.gridTemplateColumns = `repeat(${STATE.size}, 32px)`;
-
     board.innerHTML = "";
 
     for (let y=0; y<STATE.size; y++) {
@@ -141,6 +148,7 @@ export function mount(root) {
         cell.style.display = "flex";
         cell.style.alignItems = "center";
         cell.style.justifyContent = "center";
+        cell.style.userSelect = "none";
         cell.style.background = "#e5e7eb";
         cell.style.border = "1px solid #cbd5e1";
         cell.style.cursor = "pointer";
@@ -155,14 +163,22 @@ export function mount(root) {
 
   function updateDisplay() {
     const size = STATE.size;
+    const boardEl = $("#sap_board");
+    if (!boardEl) return;
+
     let flags = 0;
 
     for (let y=0; y<size; y++) {
       for (let x=0; x<size; x++) {
-        const cell = $("#sap_board").children[y*size + x];
-        const r = STATE.revealed[y][x];
-        const f = STATE.flagged[y][x];
-        const v = STATE.board[y][x];
+        const cell = boardEl.children[y*size + x];
+        if (!cell) continue;
+
+        const r = STATE.revealed[y]?.[x] ?? false;
+        const f = STATE.flagged[y]?.[x] ?? false;
+
+        // 🔒 Bezpieczny odczyt komórki (gdy plansza nie zawiera jeszcze liczb/bomb)
+        const row = STATE.board[y];
+        const v = row ? row[x] : 0;
 
         if (f) flags++;
 
@@ -185,6 +201,7 @@ export function mount(root) {
           cell.style.background = "#fde047";
         } else {
           cell.textContent = "";
+          cell.style.background = "#e5e7eb";
         }
       }
     }
@@ -192,14 +209,15 @@ export function mount(root) {
     $("#sap_left").textContent = STATE.bombs - flags;
   }
 
-  // ODSŁANIANIE
+  // ---------- LOGIKA ----------
+
   function reveal(x,y) {
     if (STATE.revealed[y][x] || STATE.flagged[y][x] || STATE.gameOver) return;
 
-    // PIERWSZY KLIK ZAWSZE BEZ BOMBY
+    // Pierwsze kliknięcie: dopiero teraz rozkładamy bomby (z wykluczeniem klikniętego pola)
     if (STATE.firstClick) {
       STATE.firstClick = false;
-      generateBoard(x,y);
+      generateBoard(x, y);
     }
 
     STATE.revealed[y][x] = true;
@@ -227,7 +245,7 @@ export function mount(root) {
     STATE.gameOver = true;
     stopTimer();
 
-    // pokaż wszystkie bomby
+    // Pokaż wszystkie bomby
     for (let y=0; y<STATE.size; y++) {
       for (let x=0; x<STATE.size; x++) {
         if (STATE.board[y][x] === "B") {
@@ -252,11 +270,10 @@ export function mount(root) {
     updateDisplay();
   }
 
-  // ----------- ZDARZENIA -----------
+  // ---------- ZDARZENIA ----------
 
   $("#sap_board").addEventListener("click", (e)=>{
     if (STATE.gameOver) return;
-
     const cell = e.target;
     if (!cell.dataset.x) return;
 
@@ -272,8 +289,9 @@ export function mount(root) {
   $("#sap_board").addEventListener("contextmenu", (e)=>{
     e.preventDefault();
     if (STATE.gameOver) return;
-
     const cell = e.target;
+    if (!cell.dataset.x) return;
+
     const x = +cell.dataset.x;
     const y = +cell.dataset.y;
 
@@ -285,13 +303,15 @@ export function mount(root) {
   });
 
   $("#sap_start").onclick = () => {
-    STATE.size = parseInt($("#sap_size").value);
-    STATE.bombs = parseInt($("#sap_bombs").value);
+    STATE.size = Math.max(2, parseInt($("#sap_size").value, 10) || 12);
+    STATE.bombs = Math.max(1, Math.min(STATE.size * STATE.size - 1, parseInt($("#sap_bombs").value, 10) || 20));
+
     STATE.firstClick = true;
+    STATE.gameOver = false;
 
     STATE.revealed = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
-    STATE.flagged = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
-    STATE.gameOver = false;
+    STATE.flagged  = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    initEmptyBoard(); // 🔸 kluczowe: plansza zerowa od początku
 
     drawBoard();
     startTimer();
@@ -310,9 +330,11 @@ export function mount(root) {
 
   $("#sap_restart").onclick = () => {
     STATE.firstClick = true;
-    STATE.revealed = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
-    STATE.flagged = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
     STATE.gameOver = false;
+
+    STATE.revealed = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    STATE.flagged  = Array.from({length:STATE.size},()=>Array(STATE.size).fill(false));
+    initEmptyBoard(); // 🔸 znów: zerowa plansza, bomby dopiero po 1. kliknięciu
 
     drawBoard();
     startTimer();
